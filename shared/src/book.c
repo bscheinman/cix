@@ -38,7 +38,7 @@ cix_book_execution(struct cix_book *book, struct cix_order *bid,
 {
 	cix_quantity_t quantity = min(bid->remaining, offer->remaining);
 
-	printf("%" CIX_PR_Q "shares of %s at %" CIX_PR_P "\n",
+	printf("executed %" CIX_PR_Q " shares of %s at %" CIX_PR_P "\n",
 	    quantity, book->symbol, price);
 	return true;
 }
@@ -59,8 +59,9 @@ cix_book_buy(struct cix_book *book, struct cix_order *bid)
 		}
 	}
 
-	if (bid->remaining > 0) {
-		return cix_heap_push(&book->bid, bid, bid->data.price);
+	if (bid->remaining > 0 &&
+	    cix_heap_push(&book->bid, bid, bid->data.price) == false) {
+		return false;
 	}
 	
 	return true;
@@ -70,7 +71,7 @@ bool
 cix_book_sell(struct cix_book *book, struct cix_order *offer)
 {
 	struct cix_order *bid;
-	
+
 	bid = cix_heap_peek(&book->bid);
 	while (bid != NULL && offer->data.price <= bid->data.price) {
 		cix_book_execution(book, bid, offer, bid->data.price);
@@ -82,8 +83,9 @@ cix_book_sell(struct cix_book *book, struct cix_order *offer)
 		}
 	}
 
-	if (offer->remaining > 0) {
-		return cix_heap_push(&book->offer, offer, offer->data.price);
+	if (offer->remaining > 0 &&
+	    cix_heap_push(&book->offer, offer, offer->data.price) == false) {
+		return false;
 	}
 
 	return true;

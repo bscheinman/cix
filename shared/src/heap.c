@@ -40,7 +40,7 @@ cix_heap_push(struct cix_heap *heap, void *value, cix_heap_score_t score)
 		heap->capacity <<= 1;
 	}
 
-	cursor = ++heap->n_elements;
+	cursor = heap->n_elements;
 	parent = CIX_HEAP_PARENT(cursor);
 	heap->elements[cursor].item = value;
 	heap->elements[cursor].score = score;
@@ -50,6 +50,7 @@ cix_heap_push(struct cix_heap *heap, void *value, cix_heap_score_t score)
 		parent = CIX_HEAP_PARENT(cursor);
 	}
 
+	++heap->n_elements;
 	return true;
 }
 

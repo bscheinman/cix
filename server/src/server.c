@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "market.h"
@@ -20,7 +21,10 @@ create_symbol_vector(void)
 		exit(EXIT_FAILURE);
 
 	for (i = 0; i < vector_size; ++i) {
-		if (cix_vector_append(&cix_symbol_vector, cix_symbols[i]) ==
+		cix_vector_element_t element;
+
+		memcpy(element.symbol, cix_symbols[i], sizeof element.symbol);
+		if (cix_vector_append(&cix_symbol_vector, &element) ==
 		    false) {
 			exit(EXIT_FAILURE);
 		}
