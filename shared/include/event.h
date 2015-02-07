@@ -32,6 +32,13 @@ bool cix_event_add(cix_event_manager_t *, cix_event_t *);
 bool cix_event_remove(cix_event_manager_t *, cix_event_t *);
 bool cix_event_managed_trigger(cix_event_t *);
 
+static inline int
+cix_event_fd(cix_event_t *event)
+{
+
+	return event->fd;
+}
+
 bool cix_event_flags_read(cix_event_flags_t);
 bool cix_event_flags_write(cix_event_flags_t);
 

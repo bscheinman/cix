@@ -1,25 +1,43 @@
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "book.h"
 #include "event.h"
+#include "market.h"
+#include "messages.h"
 #include "misc.h"
+#include "order.h"
 #include "session.h"
 
 /* XXX: Make these configurable */
 #define CIX_SESSION_THREAD_COUNT 2
 #define CIX_SESSION_ACCEPT_SOCKET "13579"
 
+enum cix_session_read_state {
+	/* XXX: Ignore authentication and identification for now */
+	CIX_READ_STATE_MESSAGE_TYPE,
+	CIX_READ_STATE_MESSAGE_DATA
+};
+
 struct cix_session {
 	int fd;
 	cix_event_t event;
+	struct {
+		enum cix_session_read_state state;
+		struct cix_message message;
+		size_t payload_target;
+		size_t bytes_read;
+	} read;
 };
 
 struct cix_session_thread {
@@ -56,15 +74,133 @@ cix_session_create(int fd)
 {
 	struct cix_session *session;
 
-	/* XXX */
 	session = malloc(sizeof *session);
 	if (session == NULL) {
 		perror("allocating session object");
 		exit(EXIT_FAILURE);
 	}
 
+	printf("created session for fd %d\n", fd);
+
 	session->fd = fd;
+	session->read.state = CIX_READ_STATE_MESSAGE_TYPE;
+	session->read.bytes_read = 0;
 	return session;
+}
+
+static void
+cix_session_process_message(struct cix_session *session,
+    struct cix_message *message)
+{
+	struct cix_order *order;
+	struct cix_message_cancel *cancel;
+	struct cix_book *book;
+
+	switch (message->type) {
+	case CIX_MESSAGE_TRADE:
+		/*
+		 * XXX: Instead of allocating a new order object and copying
+		 * data into it, read network data directly into order struct.
+		 */
+		order = malloc(sizeof *order);
+		if (order == NULL) {
+			fprintf(stderr, "failed to allocate memory\n");
+			abort();
+		}
+		memcpy(&order->data, &message->payload.order,
+		    sizeof order->data);
+		printf("received order message: %s %" PRIu32 " shares of "
+		    "%s at %" PRIu32 "\n",
+		    order->data.side == CIX_TRADE_SIDE_BUY ? "BUY" : "SELL",
+		    order->data.quantity, order->data.symbol,
+		    order->data.price / CIX_PRICE_MULTIPLIER);
+		    book = cix_market_book_get(order->data.symbol);
+		cix_book_order(book, order);
+		break;
+	case CIX_MESSAGE_CANCEL:
+		cancel = &message->payload.cancel;
+		(void)cancel;
+		//printf("cancel order ID %s\n", cancel->internal_id);
+		break;
+	}
+
+	return;
+}
+
+static void
+cix_session_read(struct cix_session *session, int fd)
+{
+	ssize_t r;
+
+	switch (session->read.state) {
+	case CIX_READ_STATE_MESSAGE_TYPE:
+read_type:
+		r = read(fd,
+		    &session->read.message.type + session->read.bytes_read,
+		    sizeof(session->read.message.type) -
+		    session->read.bytes_read);
+		if (r == -1) {
+			switch (errno) {
+			case EINTR:
+				goto read_type;
+			case EAGAIN:
+				return;
+			default:
+				perror("reading message type");
+				return;
+			}
+		}
+
+		session->read.bytes_read += r;
+		if (session->read.bytes_read <
+		    sizeof session->read.message.type) {
+			return;
+		}
+
+		session->read.bytes_read = 0;
+		session->read.payload_target = cix_message_length(
+		    (enum cix_message_type)(session->read.message.type & 0xFF));
+		if (session->read.payload_target == 0) {
+			fprintf(stderr, "invalid message type\n");
+			return;
+		}
+		session->read.state = CIX_READ_STATE_MESSAGE_DATA;
+		/* fall-through */
+
+	case CIX_READ_STATE_MESSAGE_DATA:
+read_payload:
+		r = read(fd,
+		    &session->read.message.payload + session->read.bytes_read,
+		    session->read.payload_target - session->read.bytes_read);
+		if (r == -1) {
+			switch (errno) {
+			case EINTR:
+				goto read_payload;
+			case EAGAIN:
+				return;
+			default:
+				perror("reading message payload");
+				return;
+			}
+		}
+
+		session->read.bytes_read += r;
+		if (session->read.bytes_read < session->read.payload_target) {
+			fprintf(stderr, "waiting for remainder of payload\n");
+			return;
+		}
+
+		cix_session_process_message(session, &session->read.message);
+		session->read.bytes_read = 0;
+		session->read.state = CIX_READ_STATE_MESSAGE_TYPE;
+
+		/* Try reading another message if possible */
+		goto read_type;
+	default:
+		break;
+	}
+
+	return;
 }
 
 static void
@@ -78,7 +214,10 @@ cix_session_handler(cix_event_t *event, cix_event_flags_t flags, void *closure)
 	(void)thread;
 	(void)session;
 
-	/* XXX */
+	if (cix_event_flags_read(flags) == true) {
+		cix_session_read(session, cix_event_fd(event));
+	}
+
 	return;
 }
 
@@ -174,6 +313,7 @@ cix_session_accept(void *unused)
 				continue;
 
 			thread->accept.waiting = fd;
+			/* XXX: fence */
 			if (cix_event_managed_trigger(&thread->accept.event) ==
 			    true) {
 				break;
@@ -198,13 +338,16 @@ cix_session_thread_accept(cix_event_t *event, cix_event_flags_t flags,
 	struct cix_session_thread *thread = closure;
 	struct cix_session *session;
 
+	if (cix_event_flags_read(flags) == false)
+		return;
+
 	assert(thread->accept.waiting > 0);
 
 	session = cix_session_create(thread->accept.waiting);
 
-	if (cix_event_init_fd(event, session->fd, cix_session_handler,
+	if (cix_event_init_fd(&session->event, session->fd, cix_session_handler,
 	    thread) == false ||
-	    cix_event_add(&thread->event_manager, event) == false) {
+	    cix_event_add(&thread->event_manager, &session->event) == false) {
 		fprintf(stderr, "failed to register session event\n");
 		exit(EXIT_FAILURE);
 	}
@@ -249,7 +392,7 @@ cix_session_listen(unsigned int n)
 	unsigned int i;
 
 	if (n == 0) {
-		fputs("session thread count must be positive", stderr);
+		fprintf(stderr, "session thread count must be positive");
 		exit(EXIT_FAILURE);
 	}
 

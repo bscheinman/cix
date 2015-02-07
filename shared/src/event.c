@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -36,8 +37,7 @@ cix_event_manager_run(struct cix_event_manager *manager)
 	struct epoll_event events[CIX_EVENT_MAX];
 
 	for (;;) {
-		r = epoll_wait(manager->epoll_fd, events,
-		    CIX_EVENT_MAX, -1);
+		r = epoll_wait(manager->epoll_fd, events, CIX_EVENT_MAX, -1);
 		if (r == -1) {
 			if (errno == EINTR)
 				continue;
@@ -48,8 +48,9 @@ cix_event_manager_run(struct cix_event_manager *manager)
 
 		for (i = 0; i < r; ++i) {
 			struct cix_event *event = events[i].data.ptr;
+			uint32_t flags = events[i].events;
 
-			if (event->managed == true)
+			if ((flags & EPOLLIN) && event->managed == true)
 				cix_event_managed_drain(event);
 
 			event->handler(event,
@@ -127,7 +128,7 @@ cix_event_remove(struct cix_event_manager *manager, struct cix_event *event)
 bool
 cix_event_managed_trigger(struct cix_event *event)
 {
-	int64_t value = 0;
+	int64_t value = 1;
 	ssize_t w;
 
 	assert(event->managed == true);
@@ -162,6 +163,9 @@ cix_event_managed_drain(struct cix_event *event)
 
 		if (errno == EINTR)
 			continue;
+
+		if (errno == EAGAIN)
+			return;
 
 		perror("draining managed event");
 		return;
