@@ -1,5 +1,7 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "book.h"
 #include "messages.h"
@@ -20,6 +22,10 @@ cix_book_init(struct cix_book *book, const char *symbol)
 
 	if (cix_heap_init(&book->offer, false,
 	    CIX_BOOK_DEFAULT_HEAP_SIZE) == false) {
+		return false;
+	}
+
+	if (pthread_mutex_init(&book->mutex, NULL) == false) {
 		return false;
 	}
 
@@ -87,9 +93,8 @@ bool
 cix_book_order(struct cix_book *book, struct cix_order *order)
 {
 	bool result;
-	ck_spinlock_clh_t lock;
 
-	ck_spinlock_clh_lock(&book->lock, &lock);
+	pthread_mutex_lock(&book->mutex);
 
 	order->remaining = order->data.quantity;
 	order->recv_time = book->recv_counter++;
@@ -107,6 +112,6 @@ cix_book_order(struct cix_book *book, struct cix_order *order)
 		break;
 	}
 
-	ck_spinlock_clh_unlock(&book->lock);
+	pthread_mutex_unlock(&book->mutex);
 	return result;
 }

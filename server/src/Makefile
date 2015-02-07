@@ -3,7 +3,7 @@ OBJECTS=market.o	\
 	session.o
 
 CFLAGS=-Wall -Werror -g -O0
-INCLUDES=-I../include -I../../shared/include -I/opt/backtrace/include
+INCLUDES=-I../include -I../../shared/include
 LDFLAGS=-pthread
 SHARED_LIBS=../../shared/src
 SHARED_OBJS=	$(SHARED_LIBS)/book.o		\

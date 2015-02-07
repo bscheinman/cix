@@ -97,7 +97,7 @@ cix_session_process_message(struct cix_session *session,
 	struct cix_book *book;
 
 	switch (message->type) {
-	case CIX_MESSAGE_TRADE:
+	case CIX_MESSAGE_ORDER:
 		/*
 		 * XXX: Instead of allocating a new order object and copying
 		 * data into it, read network data directly into order struct.

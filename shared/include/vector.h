@@ -7,7 +7,7 @@
 #include "messages.h"
 
 #define CIX_VECTOR_FOREACH(V, E, I)\
-for ((I) = 0, (E) = &((V)->elements[0]); (I) < (V)->size, (E) = &((V)->elements[(I)]); ++(I))
+for ((I) = 0, (E) = &((V)->elements[0]); (I) < (V)->size; ++(I), ++(E))
 
 union cix_vector_element {
 	void *ptr;

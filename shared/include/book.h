@@ -2,8 +2,7 @@
 #define _CIX_BOOK_H
 
 #include <inttypes.h>
-
-#include <ck_spinlock.h>
+#include <pthread.h>
 
 #include "heap.h"
 #include "messages.h"
@@ -19,7 +18,13 @@ struct cix_book {
 	 * responsible for order books or groups thereof.  This should
 	 * avoid any locking on the order processing fast path.
 	 */
-	ck_spinlock_clh_t *lock;
+
+	/*
+	 * XXX: As long as we're using locks, we need to switch to one that
+	 * ensures fairness and preferably minimizes cache effects.
+	 * ck_spinlock_clh seems like a good option.
+	 */
+	pthread_mutex_t mutex;
 	uint64_t recv_counter;
 	struct cix_heap bid;
 	struct cix_heap offer;
