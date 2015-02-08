@@ -43,6 +43,9 @@ cix_book_execution(struct cix_book *book, struct cix_order *bid,
 {
 	cix_quantity_t quantity = min(bid->remaining, offer->remaining);
 
+	bid->remaining -= quantity;
+	offer->remaining -= quantity;
+
 	printf("executed %" CIX_PR_Q " shares of %s at %" CIX_PR_P "\n",
 	    quantity, book->symbol, price);
 	return true;

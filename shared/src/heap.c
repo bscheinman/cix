@@ -1,6 +1,5 @@
 #include <inttypes.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #include "heap.h"
@@ -19,21 +18,6 @@ do {							\
 
 #define CIX_HEAP_COMPARE(H, X, Y)	\
 (((H)->elements[(X)].score < (H)->elements[(Y)].score) == (H)->is_min)
-
-#if 0
-static void
-cix_heap_print(struct cix_heap *heap)
-{
-	unsigned int i;
-
-	for (i = 0; i < heap->n_elements; ++i) {
-		printf("%" PRIu64 "\t", heap->elements[i].score);
-	}
-	printf("\n");
-
-	return;
-}
-#endif /* 0 */
 
 bool
 cix_heap_init(struct cix_heap *heap, bool is_min, size_t size)
@@ -91,7 +75,7 @@ cix_heap_pop(struct cix_heap *heap)
 		return NULL;
 	
 	result = heap->elements[0].item;
-	heap->elements[0] = heap->elements[heap->n_elements--];
+	heap->elements[0] = heap->elements[heap->n_elements - 1];
 
 	cursor = 0;
 	left = 1;
@@ -115,6 +99,7 @@ cix_heap_pop(struct cix_heap *heap)
 		right = CIX_HEAP_CHILDR(cursor);
 	}
 
+	--heap->n_elements;
 	return result;
 }
 
