@@ -9,18 +9,23 @@
 
 #define CIX_BOOK_DEFAULT_HEAP_SIZE	(1 << 8)
 
+#define CIX_BOOK_BUY_SCORE(O) (((((uint64_t)(O)->data.price)) << 32) | \
+	((~((O)->recv_time)) & (((uint64_t)1 << 32) - 1)))
+#define CIX_BOOK_SELL_SCORE(O) (((((uint64_t)(O)->data.price)) << 32) | \
+	((O)->recv_time & (((uint64_t)1 << 32) - 1)))
+
 bool
 cix_book_init(struct cix_book *book, const char *symbol)
 {
 
 	strncpy(book->symbol, symbol, sizeof book->symbol);
 
-	if (cix_heap_init(&book->bid, true,
+	if (cix_heap_init(&book->bid, false,
 	    CIX_BOOK_DEFAULT_HEAP_SIZE) == false) {
 		return false;
 	}
 
-	if (cix_heap_init(&book->offer, false,
+	if (cix_heap_init(&book->offer, true,
 	    CIX_BOOK_DEFAULT_HEAP_SIZE) == false) {
 		return false;
 	}
@@ -59,8 +64,8 @@ cix_book_buy(struct cix_book *book, struct cix_order *bid)
 		}
 	}
 
-	if (bid->remaining > 0 &&
-	    cix_heap_push(&book->bid, bid, bid->data.price) == false) {
+	if (bid->remaining > 0 && cix_heap_push(&book->bid, bid,
+	    CIX_BOOK_BUY_SCORE(bid)) == false) {
 		return false;
 	}
 	
@@ -83,8 +88,8 @@ cix_book_sell(struct cix_book *book, struct cix_order *offer)
 		}
 	}
 
-	if (offer->remaining > 0 &&
-	    cix_heap_push(&book->offer, offer, offer->data.price) == false) {
+	if (offer->remaining > 0 && cix_heap_push(&book->offer, offer,
+	    CIX_BOOK_SELL_SCORE(offer)) == false) {
 		return false;
 	}
 

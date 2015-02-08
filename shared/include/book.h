@@ -25,7 +25,7 @@ struct cix_book {
 	 * ck_spinlock_clh seems like a good option.
 	 */
 	pthread_mutex_t mutex;
-	uint64_t recv_counter;
+	uint32_t recv_counter;
 	struct cix_heap bid;
 	struct cix_heap offer;
 	cix_symbol_t symbol;

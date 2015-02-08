@@ -113,7 +113,7 @@ cix_session_process_message(struct cix_session *session,
 		    "%s at %" PRIu32 "\n",
 		    order->data.side == CIX_TRADE_SIDE_BUY ? "BUY" : "SELL",
 		    order->data.quantity, order->data.symbol,
-		    order->data.price / CIX_PRICE_MULTIPLIER);
+		    order->data.price);
 		    book = cix_market_book_get(order->data.symbol);
 		cix_book_order(book, order);
 		break;

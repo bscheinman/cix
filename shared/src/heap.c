@@ -1,3 +1,8 @@
+#include <inttypes.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "heap.h"
 
 #define CIX_HEAP_PARENT(N) (((N) - 1) >> 1)
@@ -13,13 +18,28 @@ do {							\
 } while (0);
 
 #define CIX_HEAP_COMPARE(H, X, Y)	\
-((((H)->elements[(Y)].score - (H)->elements[(X)].score) * (H)->multiplier) < 0)
+(((H)->elements[(X)].score < (H)->elements[(Y)].score) == (H)->is_min)
+
+#if 0
+static void
+cix_heap_print(struct cix_heap *heap)
+{
+	unsigned int i;
+
+	for (i = 0; i < heap->n_elements; ++i) {
+		printf("%" PRIu64 "\t", heap->elements[i].score);
+	}
+	printf("\n");
+
+	return;
+}
+#endif /* 0 */
 
 bool
-cix_heap_init(struct cix_heap *heap, bool min_max, size_t size)
+cix_heap_init(struct cix_heap *heap, bool is_min, size_t size)
 {
 
-	heap->multiplier = min_max ? 1 : -1;
+	heap->is_min = is_min;
 	heap->n_elements = 0;
 	heap->capacity = size;
 	heap->elements = malloc(heap->capacity * sizeof *heap->elements);
@@ -44,7 +64,7 @@ cix_heap_push(struct cix_heap *heap, void *value, cix_heap_score_t score)
 	parent = CIX_HEAP_PARENT(cursor);
 	heap->elements[cursor].item = value;
 	heap->elements[cursor].score = score;
-	while (cursor > 0 && CIX_HEAP_COMPARE(heap, cursor, parent) < 0) {
+	while (cursor > 0 && CIX_HEAP_COMPARE(heap, cursor, parent) == true) {
 		CIX_HEAP_SWAP(heap, cursor, parent);
 		cursor = parent;
 		parent = CIX_HEAP_PARENT(cursor);

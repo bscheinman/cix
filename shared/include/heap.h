@@ -16,7 +16,7 @@ struct cix_heap_node {
  * This is not thread-safe
  */
 struct cix_heap {
-	int multiplier; /* positive for min-heap, negative for max-heap */
+	bool is_min;
 	size_t n_elements;
 	size_t capacity;
 	struct cix_heap_node *elements;
