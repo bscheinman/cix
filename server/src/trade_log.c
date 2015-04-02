@@ -17,6 +17,8 @@
 /* XXX: Make configurable */
 #define CIX_TRADE_LOG_FILE_SIZE		(((off_t)1) << 26)
 
+#define CIX_TRADE_LOG_PAGE_BASE(P) (((uintptr_t)(P)) & cix_page_mask)
+
 struct cix_trade_log_data {
 	cix_execution_id_t exec_id;
 	cix_user_id_t buyer;
@@ -25,6 +27,31 @@ struct cix_trade_log_data {
 	cix_quantity_t quantity;
 	cix_price_t price;
 } CIX_STRUCT_PACKED;
+
+static unsigned long cix_page_size;
+static uintptr_t cix_page_mask;
+
+bool
+cix_trade_log_init(void)
+{
+	long r;
+
+	errno = 0;
+	r = sysconf(_SC_PAGESIZE);
+	if (r < 0) {
+		fprintf(stderr, "failed to determine page size\n");
+		return false;
+	}
+
+	cix_page_size = (unsigned long)r;
+	if ((cix_page_size & (cix_page_size - 1)) != 0) {
+		fprintf(stderr, "page size is not a power of two\n");
+		return false;
+	}
+
+	cix_page_mask = ~(cix_page_size - 1);
+	return true;
+}
 
 /* This assumes that the file has already been closed */
 static bool
@@ -72,6 +99,7 @@ cix_trade_log_file_open(struct cix_trade_log_manager *manager,
 	ck_pr_store_uint(&file->ready, 1);
 
 	success = true;
+	++manager->file_count;
 
 finish:
 	while (close(fd) == -1 && errno == EINTR);
@@ -131,7 +159,7 @@ cix_trade_log_rotate_thread(void *p)
 }
 
 bool
-cix_trade_log_init(struct cix_trade_log_manager *manager,
+cix_trade_log_manager_init(struct cix_trade_log_manager *manager,
     struct cix_trade_log_config *config)
 {
 	DIR *dir;
@@ -183,6 +211,14 @@ static bool
 cix_trade_log_trade_write(const struct cix_execution *exec, void *target)
 {
 	struct cix_trade_log_data *trade_data = target;
+	uintptr_t sync_base = CIX_TRADE_LOG_PAGE_BASE(trade_data);
+	uintptr_t sync_end = CIX_TRADE_LOG_PAGE_BASE(trade_data + 1);
+	size_t sync_size = cix_page_size + (sync_end - sync_base);
+
+	/*
+	 * XXX: Ensure that log records never cross page boundaries
+	 * so that we can skip the above check.
+	 */
 
 	trade_data->exec_id = exec->id;
 	trade_data->buyer = exec->buyer;
@@ -200,7 +236,7 @@ cix_trade_log_trade_write(const struct cix_execution *exec, void *target)
 	 * recovery procedures to ensure that clients are able to learn
 	 * which of their trades were persisted and which were not.
 	 */
-	if (msync(trade_data, sizeof *trade_data, MS_ASYNC) == -1) {
+	if (msync((void *)sync_base, sync_size, MS_ASYNC) == -1) {
 		perror("syncing log file");
 		return false;
 	}

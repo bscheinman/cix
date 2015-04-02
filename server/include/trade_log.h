@@ -59,7 +59,14 @@ struct cix_trade_log_manager {
 	pthread_t rotate_thread;
 };
 
-bool cix_trade_log_init(struct cix_trade_log_manager *,
+/*
+ * Initialize trade log subsystem.
+ * This is required before using any trade logs.
+ */
+bool cix_trade_log_init(void);
+
+/* Initialize a specific trade log manager instance */
+bool cix_trade_log_manager_init(struct cix_trade_log_manager *,
     struct cix_trade_log_config *);
 
 struct cix_execution;

@@ -5,6 +5,7 @@
 
 #include "market.h"
 #include "session.h"
+#include "trade_log.h"
 #include "vector.h"
 
 /* XXX: read these from config file */
@@ -38,6 +39,8 @@ main(int argc, char **argv)
 
 	(void)argc;
 	(void)argv;
+
+	cix_trade_log_init();
 
 	create_symbol_vector();
 	cix_market_init(cix_symbol_vector);

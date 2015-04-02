@@ -54,7 +54,7 @@ cix_book_init(struct cix_book *book, const char *symbol)
 		return false;
 	}
 
-	if (cix_trade_log_init(&book->trade_log, &config) == false) {
+	if (cix_trade_log_manager_init(&book->trade_log, &config) == false) {
 		fprintf(stderr, "failed to initialize trade log\n");
 		return false;
 	}
