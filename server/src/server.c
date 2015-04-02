@@ -23,9 +23,8 @@ create_symbol_vector(void)
 	for (i = 0; i < vector_size; ++i) {
 		cix_vector_element_t element;
 
-		memcpy(element.symbol, cix_symbols[i], sizeof element.symbol);
-		if (cix_vector_append(&cix_symbol_vector, &element) ==
-		    false) {
+		strncpy(element.symbol, cix_symbols[i], sizeof element.symbol);
+		if (cix_vector_append(&cix_symbol_vector, &element) == false) {
 			exit(EXIT_FAILURE);
 		}
 	}

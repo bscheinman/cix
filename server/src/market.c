@@ -14,7 +14,6 @@ cix_market_init(struct cix_vector *symbols)
 	unsigned int i;
 
 	CIX_VECTOR_FOREACH(symbols, item, i) {
-		printf("creating orderbook for symbol %s\n", item->symbol);
 		/* XXX: Create orderbook for symbol */
 	}
 

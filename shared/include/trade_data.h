@@ -1,24 +1,18 @@
-#ifndef _CIX_ORDER_H
-#define _CIX_ORDER_H
+#ifndef _CIX_TRADE_DATA_H
+#define _CIX_TRADE_DATA_H
+
+#include <inttypes.h>
 
 #include "messages.h"
 
-struct cix_order_id_generator {
-	uint64_t cursor;
-	uint64_t interval;
+struct cix_execution {
+	cix_execution_id_t id;
+	cix_user_id_t buyer;
+	cix_user_id_t seller;
+	cix_symbol_t symbol;
+	cix_quantity_t quantity;
+	cix_price_t price;
 };
-typedef struct cix_order_id_generator cix_order_id_generator_t;
-
-struct cix_order_id_block {
-	uint64_t cursor;
-	uint64_t finish;
-};
-typedef struct cix_order_id_block cix_order_id_block_t;
-
-#define CIX_ORDER_ID_BLOCK_INITIALIZER { .cursor = 0, .finish = 0 }
-
-bool cix_order_id_next(cix_order_id_t *, cix_order_id_generator_t *,
-    cix_order_id_block_t *);
 
 struct cix_order {
 	/*
@@ -26,6 +20,9 @@ struct cix_order {
 	 * directly into application struct.
 	 */
 	struct cix_message_order data;
+
+	cix_order_id_t id;
+	cix_user_id_t user;
 
 	/*
 	 * This is a monotonically increasing value assigned by the order
@@ -43,4 +40,4 @@ struct cix_order {
 	cix_quantity_t remaining;
 };
 
-#endif /* _CIX_ORDER_H */
+#endif /* _CIX_TRADE_DATA_H */

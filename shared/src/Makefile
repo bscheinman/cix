@@ -1,6 +1,6 @@
 CC=clang
-OBJECTS=book.o		\
-	event.o		\
+OBJECTS=event.o		\
+	id_generator.o	\
 	heap.o		\
 	vector.o
 
@@ -9,14 +9,17 @@ INCLUDES=-I../include
 
 all: $(OBJECTS) ../include/*.h
 
-book.o: book.c ../include/book.h
-	$(CC) $(INCLUDES) book.c $(CFLAGS) -c
-
 event.o: event.c ../include/event.h
 	$(CC) $(INCLUDES) event.c $(CFLAGS) -c
+
+id_generator.o: id_generator.c ../include/id_generator.h
+	$(CC) $(INCLUDES) id_generator.c $(CFLAGS) -c
 
 heap.o: heap.c ../include/heap.h
 	$(CC) $(INCLUDES) heap.c $(CFLAGS) -c
 
 vector.o: vector.c ../include/vector.h
 	$(CC) $(INCLUDES) vector.c $(CFLAGS) -c
+
+clean:
+	rm *.o
