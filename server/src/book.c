@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -7,6 +8,7 @@
 #include "book.h"
 #include "id_generator.h"
 #include "messages.h"
+#include "session.h"
 #include "trade_data.h"
 #include "trade_log.h"
 
@@ -17,20 +19,49 @@
 #define CIX_BOOK_SELL_SCORE(O) (((((uint64_t)(O)->data.price)) << 32) | \
 	((O)->recv_time & (((uint64_t)1 << 32) - 1)))
 
+struct cix_order {
+	struct cix_message_order data;
+	cix_order_id_t id;
+
+	/*
+	 * Session that received this order.  Used for sending acks,
+	 * execution notifications, etc.
+	 */
+	struct cix_session *session;
+	cix_user_id_t user;
+
+	/*
+	 * This is a monotonically increasing value assigned by the order
+	 * book.  It does not represent any specific time value, but it is
+	 * guaranteed that all orders for a given symbol will be properly
+	 * ordered by this value.
+	 */
+	uint64_t recv_time;
+	
+	/*
+	 * Shares remaining to be executed.  Once this reaches 0, the
+	 * entire order has been traded and should be removed from
+	 * the order book.
+	 */
+	cix_quantity_t remaining;
+};
+
 static struct cix_id_generator cix_exec_id_gen =
     CIX_ID_GENERATOR_INITIALIZER(1 << 14);
 
 bool
-cix_book_init(struct cix_book *book, const char *symbol)
+cix_book_init(struct cix_book *book, cix_symbol_t *symbol)
 {
 	/* XXX: Configurable */
 	char log_path[PATH_MAX];
 	struct cix_trade_log_config config = { .path = log_path };
 	int r;
 
-	strncpy(book->symbol, symbol, sizeof book->symbol);
-	if (book->symbol[sizeof(book->symbol) - 1] != '\0') {
-		fprintf(stderr, "symbol %s exceeds maximum length\n", symbol);
+	strncpy(book->symbol.symbol, symbol->symbol,
+	    sizeof book->symbol.symbol);
+	if (book->symbol.symbol[sizeof(book->symbol.symbol) - 1] != '\0') {
+		fprintf(stderr, "symbol %s exceeds maximum length\n",
+		    symbol->symbol);
 		return false;
 	}
 
@@ -45,7 +76,7 @@ cix_book_init(struct cix_book *book, const char *symbol)
 	}
 
 	r = snprintf(log_path, sizeof log_path,
-	    "/home/brendon/source/cix/logs/%s", book->symbol);
+	    "/home/brendon/source/cix/logs/%s", book->symbol.symbol);
 	if (r == -1) {
 		fprintf(stderr, "failed to create log path\n");
 		return false;
@@ -61,6 +92,16 @@ cix_book_init(struct cix_book *book, const char *symbol)
 
 	cix_id_block_init(&book->id_block);
 	return true;
+}
+
+void
+cix_book_destroy(struct cix_book *book)
+{
+
+	cix_heap_destroy(&book->bid);
+	cix_heap_destroy(&book->offer);
+
+	return;
 }
 
 static bool
@@ -81,7 +122,8 @@ cix_book_execution(struct cix_book *book, struct cix_order *bid,
 
 	execution.buyer = bid->user;
 	execution.seller = offer->user;
-	memcpy(execution.symbol, book->symbol, sizeof execution.symbol);
+	memcpy(execution.symbol.symbol, book->symbol.symbol,
+	    sizeof execution.symbol.symbol);
 	execution.quantity = min(bid->remaining, offer->remaining);
 	execution.price = price;
 
@@ -148,9 +190,28 @@ cix_book_sell(struct cix_book *book, struct cix_order *offer)
 }
 
 bool
-cix_book_order(struct cix_book *book, struct cix_order *order)
+cix_book_order(struct cix_book *book, struct cix_message_order *message,
+    struct cix_session *session)
 {
+	/* XXX: slab allocation */
+	struct cix_order *order = malloc(sizeof *order);
 
+	if (order == NULL) {
+		fprintf(stderr, "failed to allocate memory for order\n");
+		return false;
+	}
+
+	memcpy(&order->data, message, sizeof order->data);
+
+	if (cix_id_next(&cix_exec_id_gen, &book->id_block, &order->id) ==
+	    false) {
+		fprintf(stderr, "failed to generate order ID\n");
+		free(order);
+		return false;
+	}
+
+	order->session = session;
+	order->user = cix_session_user_id(session);
 	order->remaining = order->data.quantity;
 	order->recv_time = book->recv_counter++;
 

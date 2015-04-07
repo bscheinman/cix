@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ck_pr.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <netdb.h>
@@ -16,8 +17,8 @@
 #include "market.h"
 #include "messages.h"
 #include "misc.h"
-#include "order.h"
 #include "session.h"
+#include "trade_data.h"
 
 /* XXX: Make these configurable */
 #define CIX_SESSION_THREAD_COUNT 2
@@ -38,6 +39,8 @@ struct cix_session {
 		size_t payload_target;
 		size_t bytes_read;
 	} read;
+	struct cix_market *market;
+	cix_user_id_t user_id;
 };
 
 struct cix_session_thread {
@@ -63,14 +66,17 @@ struct cix_session_thread {
 		int waiting;
 	} accept;
 	pthread_t tid;
+	struct cix_market *market;
 };
 
 static struct cix_session_thread *cix_session_threads;
 static size_t cix_session_thread_count;
 
+static unsigned int cix_global_user_id;
+
 /* XXX: Use slab allocation instead of calling malloc each time */
 static struct cix_session *
-cix_session_create(int fd)
+cix_session_create(int fd, struct cix_market *market)
 {
 	struct cix_session *session;
 
@@ -85,6 +91,11 @@ cix_session_create(int fd)
 	session->fd = fd;
 	session->read.state = CIX_READ_STATE_MESSAGE_TYPE;
 	session->read.bytes_read = 0;
+
+	/* XXX: Authenticate */
+	session->user_id = ck_pr_faa_uint(&cix_global_user_id, 1);
+	session->market = market;
+
 	return session;
 }
 
@@ -92,30 +103,23 @@ static void
 cix_session_process_message(struct cix_session *session,
     struct cix_message *message)
 {
-	struct cix_order *order;
 	struct cix_message_cancel *cancel;
-	struct cix_book *book;
+	struct cix_message_order *order;
 
 	switch (message->type) {
 	case CIX_MESSAGE_ORDER:
-		/*
-		 * XXX: Instead of allocating a new order object and copying
-		 * data into it, read network data directly into order struct.
-		 */
-		order = malloc(sizeof *order);
-		if (order == NULL) {
-			fprintf(stderr, "failed to allocate memory\n");
-			abort();
-		}
-		memcpy(&order->data, &message->payload.order,
-		    sizeof order->data);
+		order = &message->payload.order;
+
 		printf("received order message: %s %" PRIu32 " shares of "
 		    "%s at %" PRIu32 "\n",
-		    order->data.side == CIX_TRADE_SIDE_BUY ? "BUY" : "SELL",
-		    order->data.quantity, order->data.symbol,
-		    order->data.price);
-		    book = cix_market_book_get(order->data.symbol);
-		cix_book_order(book, order);
+		    order->side == CIX_TRADE_SIDE_BUY ? "BUY" : "SELL",
+		    order->quantity, order->symbol.symbol, order->price);
+
+		if (cix_market_order(session->market, order, session) ==
+		    false) {
+			fprintf(stderr, "failed to process order\n");
+		}
+
 		break;
 	case CIX_MESSAGE_CANCEL:
 		cancel = &message->payload.cancel;
@@ -204,6 +208,13 @@ read_payload:
 }
 
 static void
+cix_session_write_flush(struct cix_session *session, int fd)
+{
+
+	
+}
+
+static void
 cix_session_handler(cix_event_t *event, cix_event_flags_t flags, void *closure)
 {
 	struct cix_session_thread *thread = closure;
@@ -216,6 +227,10 @@ cix_session_handler(cix_event_t *event, cix_event_flags_t flags, void *closure)
 
 	if (cix_event_flags_read(flags) == true) {
 		cix_session_read(session, cix_event_fd(event));
+	}
+
+	if (cix_event_flags_write(flags) == true) {
+		cix_session_write_flush(session, cix_event_fd(event));
 	}
 
 	return;
@@ -343,7 +358,7 @@ cix_session_thread_accept(cix_event_t *event, cix_event_flags_t flags,
 
 	assert(thread->accept.waiting > 0);
 
-	session = cix_session_create(thread->accept.waiting);
+	session = cix_session_create(thread->accept.waiting, thread->market);
 
 	if (cix_event_init_fd(&session->event, session->fd, cix_session_handler,
 	    thread) == false ||
@@ -385,7 +400,7 @@ cix_session_thread(void *closure)
  * connections to a thread pool for actual processing.
  */
 void
-cix_session_listen(unsigned int n)
+cix_session_listen(struct cix_market *market, unsigned int n)
 {
 	pthread_t accept_thread;
 	int r;
@@ -406,6 +421,7 @@ cix_session_listen(unsigned int n)
 	for (i = 0; i < n; ++i) {
 		struct cix_session_thread *thread = cix_session_threads + i;
 
+		thread->market = market;
 		r = pthread_create(&thread->tid, NULL, cix_session_thread,
 		    thread);
 		if (r != 0) {
@@ -426,4 +442,11 @@ cix_session_listen(unsigned int n)
 	}
 
 	return;
+}
+
+cix_user_id_t
+cix_session_user_id(const struct cix_session *session)
+{
+
+	return session->user_id;
 }

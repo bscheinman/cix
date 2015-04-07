@@ -11,7 +11,8 @@ SHARED_LIBS=../../shared/src
 SHARED_OBJS=	$(SHARED_LIBS)/event.o		\
 		$(SHARED_LIBS)/heap.o		\
 		$(SHARED_LIBS)/id_generator.o	\
-		$(SHARED_LIBS)/vector.o
+		$(SHARED_LIBS)/vector.o		\
+		$(SHARED_LIBS)/worq.o
 
 all: server.o $(OBJECTS)
 	$(CC) $(INCLUDES) $(CFLAGS) -o cix_server $(SHARED_OBJS) $(OBJECTS) server.o $(LDFLAGS)

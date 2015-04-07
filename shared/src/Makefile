@@ -2,7 +2,8 @@ CC=clang
 OBJECTS=event.o		\
 	id_generator.o	\
 	heap.o		\
-	vector.o
+	vector.o	\
+	worq.o
 
 CFLAGS=-Wall -Werror -g -O0 -I/opt/backtrace/include
 INCLUDES=-I../include
@@ -20,6 +21,9 @@ heap.o: heap.c ../include/heap.h
 
 vector.o: vector.c ../include/vector.h
 	$(CC) $(INCLUDES) vector.c $(CFLAGS) -c
+
+worq.o: worq.c ../include/worq.h
+	$(CC) $(INCLUDES) worq.c $(CFLAGS) -c
 
 clean:
 	rm *.o

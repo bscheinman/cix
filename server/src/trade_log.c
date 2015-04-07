@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -223,7 +224,8 @@ cix_trade_log_trade_write(const struct cix_execution *exec, void *target)
 	trade_data->exec_id = exec->id;
 	trade_data->buyer = exec->buyer;
 	trade_data->seller = exec->seller;
-	memcpy(trade_data->symbol, exec->symbol, sizeof trade_data->symbol);
+	memcpy(trade_data->symbol.symbol, exec->symbol.symbol,
+	    sizeof trade_data->symbol.symbol);
 	trade_data->quantity = exec->quantity;
 	trade_data->price = exec->price;
 

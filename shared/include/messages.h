@@ -2,7 +2,7 @@
 #define _CIX_MESSAGES_H
 
 #include <inttypes.h>
-#include <stdio.h> /* XXX: remove */
+#include <stdlib.h>
 
 #include "misc.h"
 
@@ -14,7 +14,9 @@ typedef uint64_t cix_user_id_t;
 typedef uint64_t cix_execution_id_t;
 #define CIX_PR_ID	PRIu64
 
-typedef char cix_symbol_t[CIX_SYMBOL_MAX + 1];
+typedef struct {
+	char symbol[CIX_SYMBOL_MAX + 1];
+} cix_symbol_t;
 typedef uint32_t cix_quantity_t;
 #define CIX_PR_Q	PRIu32
 
