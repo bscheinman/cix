@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -6,6 +7,7 @@
 #include "book.h"
 #include "market.h"
 #include "messages.h"
+#include "trade_log.h"
 #include "vector.h"
 #include "worq.h"
 
@@ -16,6 +18,7 @@
 struct cix_market_thread {
 	struct cix_vector *books;
 	struct cix_worq queue;
+	struct cix_trade_log_manager trade_log;
 	pthread_t tid;
 };
 
@@ -34,19 +37,37 @@ struct cix_market_order_context {
 };
 
 static bool
-cix_market_thread_init(struct cix_market_thread *thread)
+cix_market_thread_init(struct cix_market_thread *thread, unsigned int index)
 {
+	char trade_log_path[PATH_MAX];
+	struct cix_trade_log_config config = { .path = trade_log_path };
+	int b;
+
+	if (cix_vector_init(&thread->books, sizeof(struct cix_book),
+	    CIX_MARKET_DEFAULT_BOOK_COUNT) == false) {
+		fprintf(stderr, "failed to create orderbooks\n");
+		return false;
+	}
+
+	b = snprintf(trade_log_path, sizeof trade_log_path,
+	    "/home/brendon/source/cix/logs/%u", index);
+	if (b < 0) {
+		fprintf(stderr, "failed to create trade log path\n");
+		return false;
+	} else if ((unsigned int)b >= sizeof trade_log_path) {
+		fprintf(stderr, "trade log path exceeded maximum length\n");
+		return false;
+	}
+
+	if (cix_trade_log_manager_init(&thread->trade_log, &config) == false) {
+		fprintf(stderr, "failed to initialize trade log\n");
+		return false;
+	}
 
 	if (cix_worq_init(&thread->queue,
 	    sizeof(struct cix_market_order_context),
 	    CIX_MARKET_DEFAULT_WORQ_SIZE) == false) {
 		fprintf(stderr, "failed to create market work queue\n");
-		return false;
-	}
-
-	if (cix_vector_init(&thread->books, sizeof(struct cix_book),
-	    CIX_MARKET_DEFAULT_BOOK_COUNT) == false) {
-		fprintf(stderr, "failed to create orderbooks\n");
 		return false;
 	}
 
@@ -151,7 +172,7 @@ cix_market_init(struct cix_vector *symbols, unsigned int n_thread)
 	for (i = 0; i < market->n_thread; ++i) {
 		struct cix_market_thread *thread = &market->threads[i];
 
-		if (cix_market_thread_init(thread) == false) {
+		if (cix_market_thread_init(thread, i) == false) {
 			fprintf(stderr, "failed to initialize market thread\n");
 			goto fail;
 		}
@@ -169,7 +190,7 @@ cix_market_init(struct cix_vector *symbols, unsigned int n_thread)
 			goto fail;
 		}
 
-		if (cix_book_init(book, symbol) == false) {
+		if (cix_book_init(book, symbol, &thread->trade_log) == false) {
 			fprintf(stderr, "failed to initialize orderbook\n");
 			goto fail;
 		}

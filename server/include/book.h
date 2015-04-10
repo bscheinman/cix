@@ -6,7 +6,8 @@
 #include "heap.h"
 #include "id_generator.h"
 #include "messages.h"
-#include "trade_log.h"
+
+struct cix_trade_log_manager;
 
 struct cix_book {
 	uint32_t recv_counter;
@@ -17,13 +18,14 @@ struct cix_book {
 	/* XXX: Have separate id blocks for order and trade IDs */
 	struct cix_id_block id_block;
 
-	struct cix_trade_log_manager trade_log;
+	struct cix_trade_log_manager *trade_log;
 };
 
 struct cix_message_order;
 struct cix_session;
 
-bool cix_book_init(struct cix_book *, cix_symbol_t *);
+bool cix_book_init(struct cix_book *, cix_symbol_t *,
+    struct cix_trade_log_manager *);
 void cix_book_destroy(struct cix_book *);
 
 bool cix_book_order(struct cix_book *, struct cix_message_order *,

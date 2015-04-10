@@ -50,12 +50,9 @@ static struct cix_id_generator cix_exec_id_gen =
     CIX_ID_GENERATOR_INITIALIZER(1 << 14);
 
 bool
-cix_book_init(struct cix_book *book, cix_symbol_t *symbol)
+cix_book_init(struct cix_book *book, cix_symbol_t *symbol,
+    struct cix_trade_log_manager *trade_log)
 {
-	/* XXX: Configurable */
-	char log_path[PATH_MAX];
-	struct cix_trade_log_config config = { .path = log_path };
-	int r;
 
 	strncpy(book->symbol.symbol, symbol->symbol,
 	    sizeof book->symbol.symbol);
@@ -75,21 +72,7 @@ cix_book_init(struct cix_book *book, cix_symbol_t *symbol)
 		return false;
 	}
 
-	r = snprintf(log_path, sizeof log_path,
-	    "/home/brendon/source/cix/logs/%s", book->symbol.symbol);
-	if (r == -1) {
-		fprintf(stderr, "failed to create log path\n");
-		return false;
-	} else if ((size_t)r >= sizeof log_path) {
-		fprintf(stderr, "log path exceeded maximum length\n");
-		return false;
-	}
-
-	if (cix_trade_log_manager_init(&book->trade_log, &config) == false) {
-		fprintf(stderr, "failed to initialize trade log\n");
-		return false;
-	}
-
+	book->trade_log = trade_log;
 	cix_id_block_init(&book->id_block);
 	return true;
 }
@@ -133,7 +116,7 @@ cix_book_execution(struct cix_book *book, struct cix_order *bid,
 	 * XXX: Offload logging to a separate thread to allow for timestamping
 	 * and other more expensive operations.
 	 */
-	if (cix_trade_log_execution(&book->trade_log, &execution) == false) {
+	if (cix_trade_log_execution(book->trade_log, &execution) == false) {
 		fprintf(stderr, "!!!failed to log execution!!!\n");
 		exit(EXIT_FAILURE);
 	}
