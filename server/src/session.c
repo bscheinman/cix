@@ -298,7 +298,7 @@ cix_session_accept(void *unused)
 
 	for (;;) {
 		struct sockaddr client_addr;
-		socklen_t client_addr_len;
+		socklen_t client_addr_len = sizeof client_addr;
 
 		fd = accept(socket_fd, &client_addr, &client_addr_len);
 		if (fd == -1) {
@@ -422,6 +422,7 @@ cix_session_listen(struct cix_market *market, unsigned int n)
 		struct cix_session_thread *thread = cix_session_threads + i;
 
 		thread->market = market;
+		thread->accept.waiting = -1;
 		r = pthread_create(&thread->tid, NULL, cix_session_thread,
 		    thread);
 		if (r != 0) {

@@ -1,6 +1,7 @@
 #ifndef _CIX_WORQ_H
 #define _CIX_WORQ_H
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -29,12 +30,12 @@ enum cix_worq_wait {
 struct cix_worq_item;
 
 struct cix_worq {
-	struct cix_worq_item *items;
+	unsigned char *items;
 	size_t slot_size;
 	unsigned int size;
-	unsigned int mask;
-	unsigned int consume_cursor;
-	unsigned int produce_cursor;
+	uint64_t mask;
+	uint64_t consume_cursor;
+	uint64_t produce_cursor;
 };
 
 bool cix_worq_init(struct cix_worq *, size_t, unsigned int);

@@ -134,7 +134,12 @@ cix_book_buy(struct cix_book *book, struct cix_order *bid)
 	offer = cix_heap_peek(&book->offer);
 	while (bid->remaining > 0 && offer != NULL &&
 	    bid->data.price >= offer->data.price) {
-		cix_book_execution(book, bid, offer, offer->data.price);
+		if (cix_book_execution(book, bid, offer, offer->data.price) ==
+		    false) {
+			free(bid);
+			return false;
+		}
+
 		if (offer->remaining > 0)
 			break;
 
@@ -161,7 +166,12 @@ cix_book_sell(struct cix_book *book, struct cix_order *offer)
 	bid = cix_heap_peek(&book->bid);
 	while (offer->remaining > 0 && bid != NULL &&
 	    offer->data.price <= bid->data.price) {
-		cix_book_execution(book, bid, offer, bid->data.price);
+		if (cix_book_execution(book, bid, offer, bid->data.price) ==
+		    false) {
+			free(offer);
+			return false;
+		}
+
 		if (bid->remaining > 0)
 			break;
 

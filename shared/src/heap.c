@@ -34,14 +34,16 @@ bool
 cix_heap_push(struct cix_heap *heap, void *value, cix_heap_score_t score)
 {
 	size_t cursor, parent;
-	void *resize;
 
 	if (heap->n_elements == heap->capacity) {
-		resize = realloc(heap->elements, heap->capacity << 1);
+		size_t new_capacity = heap->capacity << 1;
+		void *resize = realloc(heap->elements, new_capacity);
+
 		if (resize == NULL)
 			return false;
+
 		heap->elements = resize;
-		heap->capacity <<= 1;
+		heap->capacity = new_capacity;
 	}
 
 	cursor = heap->n_elements;

@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <ck_pr.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -22,9 +23,13 @@ cix_worq_init(struct cix_worq *worq, size_t item_size, unsigned int length)
 
 	assert((length & (length - 1)) == 0);
 
-	worq->slot_size = item_size + sizeof(unsigned int);
+	worq->slot_size = item_size + sizeof(struct cix_worq_item);
 	overage = worq->slot_size & CIX_WORQ_CACHE_LINE_MASK;
-	worq->slot_size += CIX_WORQ_CACHE_LINE - overage;
+	if (overage > 0) {
+		worq->slot_size += CIX_WORQ_CACHE_LINE - overage;
+	}
+
+	printf("slot size is %zu\n", worq->slot_size);
 
 	worq->items = calloc(length, worq->slot_size);
 	if (worq->items == NULL) {
@@ -33,7 +38,7 @@ cix_worq_init(struct cix_worq *worq, size_t item_size, unsigned int length)
 	}
 
 	worq->size = length;
-	worq->mask = length - 1;
+	worq->mask = worq->size - 1;
 	worq->consume_cursor = 0;
 	worq->produce_cursor = 0;
 
@@ -52,19 +57,19 @@ void *
 cix_worq_claim(struct cix_worq *worq)
 {
 	struct cix_worq_item *slot;
-	unsigned int index;
+	uint64_t index;
 
 	for (;;) {
-		unsigned int end = worq->consume_cursor;
+		uint64_t end = ck_pr_load_64(&worq->consume_cursor);
 
-		index = ck_pr_load_uint(&worq->produce_cursor);
+		index = ck_pr_load_64(&worq->produce_cursor);
 
 		/* Queue is full */
 		if (index - end >= worq->size) {
 			return NULL;
 		}
 
-		if (ck_pr_cas_uint_value(&worq->produce_cursor, index,
+		if (ck_pr_cas_64_value(&worq->produce_cursor, index,
 		    index + 1, &index) == true) {
 			break;
 		}
@@ -98,12 +103,12 @@ cix_worq_publish(struct cix_worq *worq, void *data)
 void *
 cix_worq_pop(struct cix_worq *worq, enum cix_worq_wait wait)
 {
-	unsigned int index = worq->consume_cursor;
+	uint64_t index = worq->consume_cursor;
 	struct cix_worq_item *slot;
 
 	/* Wait for a producer to add a new item to the queue. */
 	for (;;) {
-		unsigned int last = ck_pr_load_uint(&worq->produce_cursor);
+		uint64_t last = ck_pr_load_64(&worq->produce_cursor);
 
 		/* XXX: Deal with overflow */
 		if (index < last) {
