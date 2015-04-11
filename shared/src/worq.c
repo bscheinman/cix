@@ -70,7 +70,8 @@ cix_worq_claim(struct cix_worq *worq)
 		}
 	}
 	
-	slot = &worq->items[index & worq->mask];
+	index &= worq->mask;
+	slot = (struct cix_worq_item *)(worq->items + index * worq->slot_size);
 
 	return slot->data;
 }
@@ -115,7 +116,8 @@ cix_worq_pop(struct cix_worq *worq, enum cix_worq_wait wait)
 	}
 
 	/* Wait for producer to publish new item */
-	slot = &worq->items[index & worq->mask];
+	index &= worq->mask;
+	slot = (struct cix_worq_item *)(worq->items + index * worq->slot_size);
 
 	for (;;) {
 		unsigned int ready = ck_pr_load_uint(&slot->ready);
