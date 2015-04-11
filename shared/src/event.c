@@ -100,7 +100,7 @@ cix_event_add(struct cix_event_manager *manager, struct cix_event *event)
 
 	epoll.data.ptr = event;
 	/* XXX: Allow custom flags */
-	epoll.events = EPOLLIN | EPOLLOUT | EPOLLET;
+	epoll.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET;
 
 	r = epoll_ctl(manager->epoll_fd, EPOLL_CTL_ADD, event->fd, &epoll);
 	if (r == -1) {
@@ -186,4 +186,11 @@ cix_event_flags_write(cix_event_flags_t flags)
 {
 
 	return flags & EPOLLOUT;
+}
+
+bool
+cix_event_flags_close(cix_event_flags_t flags)
+{
+
+	return flags & (EPOLLHUP | EPOLLRDHUP);
 }

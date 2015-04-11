@@ -39,7 +39,7 @@ struct cix_session {
 		size_t payload_target;
 		size_t bytes_read;
 	} read;
-	struct cix_market *market;
+	struct cix_session_thread *thread;
 	cix_user_id_t user_id;
 };
 
@@ -76,17 +76,14 @@ static unsigned int cix_global_user_id;
 
 /* XXX: Use slab allocation instead of calling malloc each time */
 static struct cix_session *
-cix_session_create(int fd, struct cix_market *market)
+cix_session_create(int fd, struct cix_session_thread *thread)
 {
 	struct cix_session *session;
 
 	session = malloc(sizeof *session);
 	if (session == NULL) {
-		perror("allocating session object");
-		exit(EXIT_FAILURE);
+		return NULL;
 	}
-
-	printf("created session for fd %d\n", fd);
 
 	session->fd = fd;
 	session->read.state = CIX_READ_STATE_MESSAGE_TYPE;
@@ -94,7 +91,7 @@ cix_session_create(int fd, struct cix_market *market)
 
 	/* XXX: Authenticate */
 	session->user_id = ck_pr_faa_uint(&cix_global_user_id, 1);
-	session->market = market;
+	session->thread = thread;
 
 	return session;
 }
@@ -110,12 +107,14 @@ cix_session_process_message(struct cix_session *session,
 	case CIX_MESSAGE_ORDER:
 		order = &message->payload.order;
 
+		/*
 		printf("received order message: %s %" PRIu32 " shares of "
 		    "%s at %" PRIu32 "\n",
 		    order->side == CIX_TRADE_SIDE_BUY ? "BUY" : "SELL",
 		    order->quantity, order->symbol.symbol, order->price);
+		*/
 
-		if (cix_market_order(session->market, order, session) ==
+		if (cix_market_order(session->thread->market, order, session) ==
 		    false) {
 			fprintf(stderr, "failed to process order\n");
 		}
@@ -128,6 +127,18 @@ cix_session_process_message(struct cix_session *session,
 		break;
 	}
 
+	return;
+}
+
+static void cix_session_thread_session_remove(struct cix_session_thread *thread,
+    struct cix_session *session);
+
+static void
+cix_session_close(struct cix_session *session, int fd)
+{
+
+	cix_session_thread_session_remove(session->thread, session);
+	while (close(fd) == -1 && errno == EINTR);
 	return;
 }
 
@@ -224,6 +235,11 @@ cix_session_handler(cix_event_t *event, cix_event_flags_t flags, void *closure)
 	(void)flags;
 	(void)thread;
 	(void)session;
+
+	if (cix_event_flags_close(flags) == true) {
+		cix_session_close(session, cix_event_fd(event));
+		return;
+	}
 
 	if (cix_event_flags_read(flags) == true) {
 		cix_session_read(session, cix_event_fd(event));
@@ -358,7 +374,11 @@ cix_session_thread_accept(cix_event_t *event, cix_event_flags_t flags,
 
 	assert(thread->accept.waiting > 0);
 
-	session = cix_session_create(thread->accept.waiting, thread->market);
+	session = cix_session_create(thread->accept.waiting, thread);
+	if (session == NULL) {
+		fprintf(stderr, "failed to create new session\n");
+		exit(EXIT_FAILURE);
+	}
 
 	if (cix_event_init_fd(&session->event, session->fd, cix_session_handler,
 	    thread) == false ||
@@ -368,6 +388,17 @@ cix_session_thread_accept(cix_event_t *event, cix_event_flags_t flags,
 	}
 
 	thread->accept.waiting = -1;
+	return;
+}
+
+static void
+cix_session_thread_session_remove(struct cix_session_thread *thread,
+    struct cix_session *session)
+{
+
+	assert(session->thread == thread);
+
+	cix_event_remove(&thread->event_manager, &session->event);
 	return;
 }
 

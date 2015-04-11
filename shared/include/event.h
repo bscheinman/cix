@@ -41,5 +41,6 @@ cix_event_fd(cix_event_t *event)
 
 bool cix_event_flags_read(cix_event_flags_t);
 bool cix_event_flags_write(cix_event_flags_t);
+bool cix_event_flags_close(cix_event_flags_t);
 
 #endif /* _CIX_EVENT_H */
