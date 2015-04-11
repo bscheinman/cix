@@ -18,6 +18,14 @@
 struct cix_market_thread {
 	struct cix_vector *books;
 	struct cix_worq queue;
+
+	/*
+	 * Indicates when orders are available for processing.
+	 * XXX: Make this configurable (as opposed to busy waiting)
+	 */
+	struct cix_event event;
+	struct cix_event_manager event_manager;
+
 	struct cix_trade_log_manager trade_log;
 	pthread_t tid;
 };
@@ -35,6 +43,48 @@ struct cix_market_order_context {
 	struct cix_message_order order;
 	struct cix_session *session;
 };
+
+static void
+cix_market_thread_process(struct cix_event *event, cix_event_flags_t flags,
+    void *p)
+{
+	struct cix_market_thread *thread = p;
+
+	(void)event;
+	(void)flags;
+
+	for (;;) {
+		struct cix_market_order_context *context =
+		    cix_worq_pop(&thread->queue, CIX_WORQ_WAIT_BLOCK_SLOT);
+		struct cix_book *book;
+
+		if (context == NULL)
+			break;
+
+		/*
+		 * XXX: Associate a number with each symbol and have clients
+		 * send those instead to avoid this lookup.  In the short term
+		 * we could also consider using a hash table here.
+		 */
+		CIX_VECTOR_FOREACH(book, thread->books) {
+			if (strcmp(book->symbol.symbol,
+			    context->order.symbol.symbol) != 0) {
+				continue;
+			}
+
+			if (cix_book_order(book, &context->order,
+			    context->session) == false) {
+				fprintf(stderr, "failed to process order\n");
+			}
+
+			break;
+		}
+		
+		cix_worq_complete(&thread->queue, context);
+	}
+
+	return;
+}
 
 static bool
 cix_market_thread_init(struct cix_market_thread *thread, unsigned int index)
@@ -71,6 +121,20 @@ cix_market_thread_init(struct cix_market_thread *thread, unsigned int index)
 		return false;
 	}
 
+	cix_event_manager_init(&thread->event_manager);
+
+	if (cix_event_init_managed(&thread->event,
+	    cix_market_thread_process, thread) == false) {
+		fprintf(stderr, "failed to initialize market event listener\n");
+		return false;
+	}
+
+	if (cix_event_add(&thread->event_manager, &thread->event) == false) {
+		fprintf(stderr, "failed to initialize market event loop\n");
+		return false;
+	}
+
+	/* XXX: cleanup in case of failure */
 	return true;
 }
 
@@ -114,33 +178,7 @@ cix_market_thread_run(void *p)
 {
 	struct cix_market_thread *thread = p;
 
-	for (;;) {
-		struct cix_market_order_context *context =
-		    cix_worq_pop(&thread->queue, CIX_WORQ_WAIT_BLOCK);
-		struct cix_book *book;
-
-		/*
-		 * XXX: Associate a number with each symbol and have clients
-		 * send those instead to avoid this lookup.  In the short term
-		 * we could also consider using a hash table here.
-		 */
-		CIX_VECTOR_FOREACH(book, thread->books) {
-			if (strcmp(book->symbol.symbol,
-			    context->order.symbol.symbol) != 0) {
-				continue;
-			}
-
-			if (cix_book_order(book, &context->order,
-			    context->session) == false) {
-				fprintf(stderr, "failed to process order\n");
-			}
-
-			break;
-		}
-		
-		cix_worq_complete(&thread->queue, context);
-	}
-
+	cix_event_manager_run(&thread->event_manager);
 	return NULL;
 }
 
@@ -258,5 +296,6 @@ cix_market_order(struct cix_market *market, struct cix_message_order *order,
 	memcpy(&context->order, order, sizeof context->order);
 
 	cix_worq_publish(&thread->queue, context);
+	cix_event_managed_trigger(&thread->event);
 	return true;
 }
