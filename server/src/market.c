@@ -256,7 +256,7 @@ cix_market_order(struct cix_market *market, struct cix_message_order *order,
 
 	context->session = session;
 	memcpy(&context->order, order, sizeof context->order);
-	
+
 	cix_worq_publish(&thread->queue, context);
 	return true;
 }
