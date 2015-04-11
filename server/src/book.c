@@ -132,17 +132,21 @@ cix_book_buy(struct cix_book *book, struct cix_order *bid)
 	struct cix_order *offer;
 	
 	offer = cix_heap_peek(&book->offer);
-	while (offer != NULL && bid->data.price >= offer->data.price) {
+	while (bid->remaining > 0 && offer != NULL &&
+	    bid->data.price >= offer->data.price) {
 		cix_book_execution(book, bid, offer, offer->data.price);
 		if (offer->remaining > 0)
 			break;
 
 		(void)cix_heap_pop(&book->offer);
+		free(offer);
 		offer = cix_heap_peek(&book->offer);
 	}
 
-	if (bid->remaining > 0 && cix_heap_push(&book->bid, bid,
-	    CIX_BOOK_BUY_SCORE(bid)) == false) {
+	if (bid->remaining == 0) {
+		free(bid);
+	} else if (cix_heap_push(&book->bid, bid, CIX_BOOK_BUY_SCORE(bid)) ==
+	    false) {
 		return false;
 	}
 	
@@ -155,16 +159,20 @@ cix_book_sell(struct cix_book *book, struct cix_order *offer)
 	struct cix_order *bid;
 
 	bid = cix_heap_peek(&book->bid);
-	while (bid != NULL && offer->data.price <= bid->data.price) {
+	while (offer->remaining > 0 && bid != NULL &&
+	    offer->data.price <= bid->data.price) {
 		cix_book_execution(book, bid, offer, bid->data.price);
 		if (bid->remaining > 0)
 			break;
 
 		(void)cix_heap_pop(&book->bid);
+		free(bid);
 		bid = cix_heap_peek(&book->bid);
 	}
 
-	if (offer->remaining > 0 && cix_heap_push(&book->offer, offer,
+	if (offer->remaining == 0) {
+		free(offer);
+	} else if (cix_heap_push(&book->offer, offer,
 	    CIX_BOOK_SELL_SCORE(offer)) == false) {
 		return false;
 	}
@@ -201,10 +209,8 @@ cix_book_order(struct cix_book *book, struct cix_message_order *message,
 	switch (order->data.side) {
 	case CIX_TRADE_SIDE_BUY:
 		return cix_book_buy(book, order);
-		break;
 	case CIX_TRADE_SIDE_SELL:
 		return cix_book_sell(book, order);
-		break;
 	default:
 		fprintf(stderr, "unknown trade side %u\n", order->data.side);
 		abort();
