@@ -14,8 +14,13 @@ SHARED_OBJS=	$(SHARED_LIBS)/event.o		\
 		$(SHARED_LIBS)/vector.o		\
 		$(SHARED_LIBS)/worq.o
 
-all: server.o $(OBJECTS)
+all: cix_server log_viewer
+
+cix_server: server.o $(OBJECTS)
 	$(CC) $(INCLUDES) $(CFLAGS) -o cix_server $(SHARED_OBJS) $(OBJECTS) server.o $(LDFLAGS)
+
+log_viewer: log_viewer.c trade_log.o ../include/*.h
+	$(CC) $(INCLUDES) $(CFLAGS) -o log_viewer $(SHARED_OBJS) trade_log.o log_viewer.c $(LDFLAGS)
 
 book.o: book.c ../include/*.h
 	$(CC) $(INCLUDES) book.c $(CFLAGS) -c

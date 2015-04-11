@@ -63,6 +63,8 @@ cix_trade_log_file_open(struct cix_trade_log_manager *manager,
 	int fd;
 	bool success = false;
 
+	/* XXX: Add file header */
+
 	/* XXX: Make naming configurable */
 	if (snprintf(path, sizeof path, "%s/cixlog_%u", manager->path,
 	    manager->file_count) >= sizeof path) {
@@ -274,4 +276,143 @@ start:
 	manager->active_file = file_index;
 
 	goto start;
+}
+
+bool
+cix_trade_log_iterator_init(struct cix_trade_log_iterator *iter,
+    const char *path)
+{
+
+	strncpy(iter->path, path, sizeof iter->path);
+	if (iter->path[sizeof(iter->path) - 1] != '\0') {
+		fprintf(stderr, "path %s exceeds maximum length\n", path);
+		return false;
+	}
+
+	iter->dir = opendir(path);
+	if (iter->dir == NULL) {
+		fprintf(stderr, "failed to open directory %s: %s\n",
+		    path, strerror(errno));
+		return false;
+	}
+
+	iter->fd = -1;
+	iter->data = NULL;
+	iter->cursor = NULL;
+	iter->size = 0;
+
+	return true;
+}
+
+void
+cix_trade_log_iterator_destroy(struct cix_trade_log_iterator *iter)
+{
+
+	/* XXX */
+	return;
+}
+
+static bool
+cix_trade_log_iterator_file_next(struct cix_trade_log_iterator *iter)
+{
+	struct dirent entry;
+	struct dirent *result;
+	char entry_path[PATH_MAX];
+	int b;
+	struct stat s;
+
+	for (;;) {
+		if (readdir_r(iter->dir, &entry, &result) != 0) {
+			fprintf(stderr, "failed to read next file\n");
+			return false;
+		}
+
+		if (result == NULL) {
+			return false;
+		}
+
+		if (entry.d_type == DT_REG) {
+			break;
+		}
+	}
+
+	b = snprintf(entry_path, sizeof entry_path, "%s/%s", iter->path,
+	    entry.d_name);
+	if (b < 0) {
+		fprintf(stderr, "failed to create file path\n");
+		return false;
+	} else if ((size_t)b >= sizeof entry_path) {
+		fprintf(stderr, "file path exceeded maximum length\n");
+		return false;
+	}
+
+	iter->fd = open(entry_path, O_RDONLY);
+	if (iter->fd == -1) {
+		fprintf(stderr, "failed to open file %s: %s\n", entry_path,
+		    strerror(errno));
+		return false;
+	}
+
+	if (fstat(iter->fd, &s) == -1) {
+		fprintf(stderr, "failed to stat file %s: %s\n", entry_path,
+		    strerror(errno));
+		return false;
+	}
+
+	iter->size = s.st_size;
+	iter->data = mmap(NULL, iter->size, PROT_READ, MAP_PRIVATE,
+	    iter->fd, 0);
+	if (iter->data == MAP_FAILED) {
+		fprintf(stderr, "failed to map file %s: %s\n", entry_path,
+		    strerror(errno));
+		return false;
+	}
+
+	iter->cursor = iter->data;
+
+	return true;
+}
+
+bool
+cix_trade_log_iterator_next(struct cix_trade_log_iterator *iter,
+    struct cix_execution *exec)
+{
+	struct cix_trade_log_data *data;
+
+	for (;;) {
+		if (iter->cursor == NULL) {
+			goto next_file;
+		}
+
+		if (iter->cursor + sizeof(struct cix_trade_log_data) >
+		    iter->data + iter->size) {
+			goto next_file;
+		}
+
+		data = (struct cix_trade_log_data *)iter->cursor;
+
+		/*
+		 * XXX: Need better way to detect end of useful data in file.
+		 * This will be easier once we have a real file header.
+		 */
+		if (data->symbol.symbol[0] != '\0') {
+			break;
+		}
+
+next_file:
+		if (cix_trade_log_iterator_file_next(iter) == false) {
+			return false;
+		}
+	}
+
+	exec->id = data->exec_id;
+	exec->buyer = data->buyer;
+	exec->seller = data->seller;
+	memcpy(exec->symbol.symbol, data->symbol.symbol,
+	    sizeof exec->symbol.symbol);
+	exec->quantity = data->quantity;
+	exec->price = data->price;
+
+	iter->cursor += sizeof(struct cix_trade_log_data);
+	return true;
 }

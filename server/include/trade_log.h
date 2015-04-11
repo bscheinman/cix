@@ -1,9 +1,12 @@
 #ifndef _CIX_TRADE_LOG_H
 #define _CIX_TRADE_LOG_H
 
+#include <dirent.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <sys/types.h>
 
 #include "event.h"
 
@@ -73,5 +76,25 @@ struct cix_execution;
 
 bool cix_trade_log_execution(struct cix_trade_log_manager *,
     const struct cix_execution *);
+
+/*
+ * API for reading from trade log files
+ */
+
+struct cix_trade_log_file;
+
+struct cix_trade_log_iterator {
+	char path[PATH_MAX];
+	DIR *dir;
+	int fd;
+	unsigned char *data;
+	unsigned char *cursor;
+	size_t size;
+};
+
+bool cix_trade_log_iterator_init(struct cix_trade_log_iterator *, const char *);
+void cix_trade_log_iterator_destroy(struct cix_trade_log_iterator *);
+bool cix_trade_log_iterator_next(struct cix_trade_log_iterator *,
+    struct cix_execution *);
 
 #endif /* _CIX_TRADE_LOG_H */
