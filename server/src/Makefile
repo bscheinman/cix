@@ -1,3 +1,5 @@
+.PHONY:all clean
+
 CC=clang
 OBJECTS=book.o		\
 	market.o	\
