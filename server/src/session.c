@@ -21,7 +21,6 @@
 #include "trade_data.h"
 
 /* XXX: Make these configurable */
-#define CIX_SESSION_THREAD_COUNT 2
 #define CIX_SESSION_ACCEPT_SOCKET "13579"
 
 enum cix_session_read_state {

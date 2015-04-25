@@ -40,6 +40,12 @@ enum cix_trade_side {
 	CIX_TRADE_SIDE_SELL = 1
 };
 
+enum cix_order_status {
+	CIX_ORDER_STATUS_OK = 0,
+	CIX_ORDER_STATUS_ERROR
+	/* XXX: Add values for specific error types */
+};
+
 /*
  * XXX: Look into whether extra struct padding would improve performance.
  */
@@ -62,12 +68,14 @@ struct cix_message_cancel {
 } CIX_STRUCT_PACKED;
 
 struct cix_message_ack {
-	/* XXX == */
+	char external_id[CIX_EXTERNAL_ID_MAX];
+	cix_order_id_t internal_id;
+	uint8_t status;
 };
 
 struct cix_message_trade {
 	/* XXX */
-};
+} CIX_STRUCT_PACKED;
 
 union cix_message_payload {
 	struct cix_message_order order;
@@ -81,7 +89,7 @@ struct cix_message {
 	union cix_message_payload payload;
 } CIX_STRUCT_PACKED;
 
-static size_t __attribute__((unused))
+static inline size_t
 cix_message_length(enum cix_message_type type)
 {
 

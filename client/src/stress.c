@@ -125,9 +125,10 @@ stress_thread_init_orders(struct stress_thread *thread)
 static void
 stress_thread_init(struct stress_thread *thread)
 {
+	struct cix_client_callbacks callbacks = { NULL, NULL };
 
 	if (cix_client_init(&thread->client, stress_config.address,
-	    stress_config.port) == false) {
+	    stress_config.port, &callbacks, NULL) == false) {
 		fprintf(stderr, "failed to connect\n");
 		exit(EXIT_FAILURE);
 	}

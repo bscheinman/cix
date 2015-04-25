@@ -1,5 +1,6 @@
 CC=clang
-OBJECTS=event.o		\
+OBJECTS=buffer.o	\
+	event.o		\
 	id_generator.o	\
 	heap.o		\
 	vector.o	\
@@ -9,6 +10,9 @@ CFLAGS=-Wall -Werror -g -O0 -I/opt/backtrace/include
 INCLUDES=-I../include
 
 all: $(OBJECTS) ../include/*.h
+
+buffer.o: buffer.c ../include/buffer.h
+	$(CC) $(INCLUDES) buffer.c $(CFLAGS) -c
 
 event.o: event.c ../include/event.h
 	$(CC) $(INCLUDES) event.c $(CFLAGS) -c

@@ -53,9 +53,7 @@ cix_event_manager_run(struct cix_event_manager *manager)
 			if ((flags & EPOLLIN) && event->managed == true)
 				cix_event_managed_drain(event);
 
-			event->handler(event,
-			    (cix_event_flags_t)events[i].events,
-			    event->closure);
+			event->handler(event, flags, event->closure);
 		}
 	}
 
