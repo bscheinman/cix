@@ -16,7 +16,9 @@
 #include "trade_log.h"
 
 /* XXX: Make configurable */
-#define CIX_TRADE_LOG_FILE_SIZE		(((off_t)1) << 26)
+#define CIX_TRADE_LOG_FILE_SIZE		(((off_t)1) << 20)
+#define CIX_TRADE_LOG_FILE_BYTE_SIZE	\
+(CIX_TRADE_LOG_FILE_SIZE * sizeof(struct cix_trade_log_data))
 
 #define CIX_TRADE_LOG_PAGE_BASE(P) (((uintptr_t)(P)) & cix_page_mask)
 
@@ -81,13 +83,13 @@ cix_trade_log_file_open(struct cix_trade_log_manager *manager,
 		return false;
 	}
 
-	if (ftruncate(fd, CIX_TRADE_LOG_FILE_SIZE) == -1) {
+	if (ftruncate(fd, CIX_TRADE_LOG_FILE_BYTE_SIZE) == -1) {
 		fprintf(stderr, "failed to expand log file %s: %s\n",
 		    path, strerror(errno));
 		goto finish;
 	}
 
-	file->log.start = mmap(NULL, CIX_TRADE_LOG_FILE_SIZE, PROT_WRITE,
+	file->log.start = mmap(NULL, CIX_TRADE_LOG_FILE_BYTE_SIZE, PROT_WRITE,
 	    MAP_SHARED, fd, 0);
 	if (file->log.start == MAP_FAILED) {
 		fprintf(stderr, "failed to map log file %s: %s\n",
@@ -96,7 +98,10 @@ cix_trade_log_file_open(struct cix_trade_log_manager *manager,
 	}
 
 	file->log.cursor = file->log.start;
-	file->log.end = file->log.start + CIX_TRADE_LOG_FILE_SIZE;
+	file->log.end = file->log.start + CIX_TRADE_LOG_FILE_BYTE_SIZE;
+
+	printf("replacing %s with %s\n", file->path, path);
+	strcpy(file->path, path);
 
 	ck_pr_fence_store();
 	ck_pr_store_uint(&file->ready, 1);
@@ -115,15 +120,13 @@ cix_trade_log_file_close(struct cix_trade_log_file *file)
 	int r;
 
 	r = munmap(file->log.start, CIX_TRADE_LOG_FILE_SIZE);
-	if (r == -1)
-		perror("unmapping log file");
+	if (r == -1) {
+		fprintf(stderr, "failed to unmap log file\n");
+	}
 
 	file->log.start = NULL;
 	file->log.cursor = NULL;
 	file->log.end = NULL;
-
-	ck_pr_store_uint(&file->ready, 0);
-	ck_pr_fence_store();
 
 	return true;
 }
@@ -133,14 +136,20 @@ cix_trade_log_rotate(struct cix_event *event, cix_event_flags_t flags,
     void *closure)
 {
 	struct cix_trade_log_manager *manager = closure;
-	unsigned int rotate_index = (manager->active_file + 1) % 2;
+	unsigned int rotate_index = manager->active_file ^ 1;
 	struct cix_trade_log_file *file = &manager->files[rotate_index];
+
+	(void)event;
+	(void)flags;
+
+	printf("rotating file %s\n", file->path);
 
 	if (cix_trade_log_file_close(file) == false ||
 	    cix_trade_log_file_open(manager, file) == false) {
 		fprintf(stderr, "failed to rotate log files\n");
 	}
 
+	printf("finished rotating file\n");
 	return;
 }
 
@@ -182,8 +191,9 @@ cix_trade_log_manager_init(struct cix_trade_log_manager *manager,
 			    "%s\n", manager->path, strerror(errno));
 			return false;
 		}
+	} else {
+		closedir(dir);
 	}
-	closedir(dir);
 
 	if (cix_trade_log_file_open(manager, &manager->files[0]) == false ||
 	    cix_trade_log_file_open(manager, &manager->files[1]) == false) {
@@ -215,7 +225,8 @@ cix_trade_log_trade_write(const struct cix_execution *exec, void *target)
 {
 	struct cix_trade_log_data *trade_data = target;
 	uintptr_t sync_base = CIX_TRADE_LOG_PAGE_BASE(trade_data);
-	uintptr_t sync_end = CIX_TRADE_LOG_PAGE_BASE(trade_data + 1);
+	uintptr_t sync_end = CIX_TRADE_LOG_PAGE_BASE(
+	    (unsigned char *)(trade_data + 1) - 1);
 	size_t sync_size = cix_page_size + (sync_end - sync_base);
 
 	/*
@@ -266,7 +277,11 @@ start:
 		return cix_trade_log_trade_write(execution, target);
 	}
 
-	file_index = (file_index + 1) % 2;
+	printf("log file %s is full\n", file->path);
+	printf("rotating log file\n");
+
+	file->ready = 0;
+	file_index ^= 1;
 
 	new_file = &manager->files[file_index];
 
@@ -274,6 +289,12 @@ start:
 	ck_pr_fence_acquire();
 
 	manager->active_file = file_index;
+	printf("new log file is %s\n", manager->files[file_index].path);
+	ck_pr_fence_store_load();
+	if (cix_event_managed_trigger(&manager->update_event) == false) {
+		fprintf(stderr, "failed to initiate log rotation\n");
+		exit(EXIT_FAILURE);
+	}
 
 	goto start;
 }
@@ -309,6 +330,7 @@ cix_trade_log_iterator_destroy(struct cix_trade_log_iterator *iter)
 {
 
 	/* XXX */
+	closedir(iter->dir);
 	return;
 }
 

@@ -50,8 +50,12 @@ cix_event_manager_run(struct cix_event_manager *manager)
 			struct cix_event *event = events[i].data.ptr;
 			uint32_t flags = events[i].events;
 
-			if ((flags & EPOLLIN) && event->managed == true)
+			if (event->managed == true) {
+				if ((flags & EPOLLIN) == 0) {
+					continue;
+				}
 				cix_event_managed_drain(event);
+			}
 
 			event->handler(event, flags, event->closure);
 		}
@@ -116,7 +120,7 @@ cix_event_remove(struct cix_event_manager *manager, struct cix_event *event)
 
 	r = epoll_ctl(manager->epoll_fd, EPOLL_CTL_DEL, event->fd, NULL);
 	if (r == -1) {
-		perror("unregistering event");
+		fprintf(stderr, "failed to unregister event\n");
 		return false;
 	}
 
@@ -139,7 +143,7 @@ cix_event_managed_trigger(struct cix_event *event)
 		if (errno == EINTR)
 			continue;
 
-		perror("triggering managed event");
+		fprintf(stderr, "failed to trigger managed event\n");
 		return false;
 	}
 
@@ -165,7 +169,7 @@ cix_event_managed_drain(struct cix_event *event)
 		if (errno == EAGAIN)
 			return;
 
-		perror("draining managed event");
+		fprintf(stderr, "failed to drain managed event\n");
 		return;
 	}
 	

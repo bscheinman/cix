@@ -13,7 +13,7 @@
 
 /* XXX: Make this configurable */
 #define CIX_MARKET_DEFAULT_BOOK_COUNT 64
-#define CIX_MARKET_DEFAULT_WORQ_SIZE 256
+#define CIX_MARKET_DEFAULT_WORQ_SIZE (1 << 16)
 
 struct cix_market_thread {
 	struct cix_vector *books;

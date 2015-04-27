@@ -29,6 +29,7 @@ struct cix_trade_log_file {
 	} log;
 
 	unsigned int ready;
+	char path[PATH_MAX];
 };
 
 struct cix_trade_log_config {
