@@ -23,8 +23,8 @@ struct cix_event {
 	void *closure;
 };
 
-void cix_event_manager_init(cix_event_manager_t *);
-void cix_event_manager_run(cix_event_manager_t *);
+bool cix_event_manager_init(cix_event_manager_t *);
+bool cix_event_manager_run(cix_event_manager_t *);
 
 bool cix_event_init_fd(cix_event_t *, int, cix_event_handler_t *, void *);
 bool cix_event_init_managed(cix_event_t *, cix_event_handler_t *, void *);

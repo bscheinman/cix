@@ -1,4 +1,5 @@
-CC=clang
+include ../../cix.mk
+
 OBJECTS=buffer.o	\
 	event.o		\
 	id_generator.o	\
@@ -6,7 +7,6 @@ OBJECTS=buffer.o	\
 	vector.o	\
 	worq.o
 
-CFLAGS=-Wall -Werror -g -O0 -I/opt/backtrace/include
 INCLUDES=-I../include
 
 all: $(OBJECTS) ../include/*.h

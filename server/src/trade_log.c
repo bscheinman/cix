@@ -159,7 +159,12 @@ cix_trade_log_rotate_thread(void *p)
 	struct cix_trade_log_manager *manager = p;
 	struct cix_event_manager event_manager;
 
-	cix_event_manager_init(&event_manager);
+	if (cix_event_manager_init(&event_manager) == false) {
+		fprintf(stderr, "failed to initialize trade log event "
+		    "manager\n");
+		exit(EXIT_FAILURE);
+	}
+
 	if (cix_event_add(&event_manager, &manager->update_event) == false) {
 		fprintf(stderr,
 		    "failed to initialize trade log update thread\n");

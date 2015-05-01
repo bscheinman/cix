@@ -10,7 +10,7 @@
 
 #define CIX_HEAP_SWAP(H, X, Y)				\
 do {							\
-	typeof(*(H)->elements) _tmp;			\
+	struct cix_heap_node _tmp;			\
 	_tmp = (H)->elements[(X)];			\
 	(H)->elements[(X)] = (H)->elements[(Y)];	\
 	(H)->elements[(Y)] = _tmp;			\

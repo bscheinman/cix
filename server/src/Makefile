@@ -1,12 +1,12 @@
+include ../../cix.mk
+
 .PHONY:all clean
 
-CC=clang
 OBJECTS=book.o		\
 	market.o	\
 	session.o	\
 	trade_log.o
 
-CFLAGS=-Wall -Werror -g -O0 -fcolor-diagnostics
 INCLUDES=-I../include -I../../shared/include
 LDFLAGS=-pthread
 SHARED_LIBS=../../shared/src

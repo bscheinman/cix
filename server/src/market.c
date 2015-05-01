@@ -121,7 +121,10 @@ cix_market_thread_init(struct cix_market_thread *thread, unsigned int index)
 		return false;
 	}
 
-	cix_event_manager_init(&thread->event_manager);
+	if (cix_event_manager_init(&thread->event_manager) == false) {
+		fprintf(stderr, "failed to initialize market event manager\n");
+		return false;
+	}
 
 	if (cix_event_init_managed(&thread->event,
 	    cix_market_thread_process, thread) == false) {

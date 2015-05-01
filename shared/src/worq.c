@@ -74,7 +74,7 @@ cix_worq_claim(struct cix_worq *worq)
 			break;
 		}
 	}
-	
+
 	index &= worq->mask;
 	slot = (struct cix_worq_item *)(worq->items + index * worq->slot_size);
 

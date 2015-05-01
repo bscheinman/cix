@@ -159,7 +159,10 @@ cix_client_init(struct cix_client *client, const char *address, uint16_t port,
 	int r;
 	char port_buf[8];
 
-	cix_event_manager_init(&client->event_manager);
+	if (cix_event_manager_init(&client->event_manager) == false) {
+		fprintf(stderr, "Failed to initialize client event manager\n");
+		return false;
+	}
 
 	client->callbacks = *callbacks;
 	client->closure = closure;

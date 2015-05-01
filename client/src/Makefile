@@ -1,10 +1,9 @@
-.PHONY:all clean
+include ../../cix.mk
 
-CC=clang
+.PHONY:all clean
 
 OBJECTS=client.o
 
-CFLAGS=-Wall -Werror -g -O0 -fcolor-diagnostics
 INCLUDES=-I../include -I../../shared/include
 LDFLAGS=-pthread
 SHARED_LIBS=../../shared/src

@@ -13,24 +13,46 @@
 
 #define CIX_EVENT_MAX 8
 
-typedef unsigned int cix_event_trigger_t;
-
-void
+bool
 cix_event_manager_init(struct cix_event_manager *manager)
 {
 
 	manager->epoll_fd = epoll_create(1);
 	if (manager->epoll_fd == -1) {
-		perror("initializing event loop");
-		exit(EXIT_FAILURE);
+		fprintf(stderr, "failed to initialize event loop\n");
+		return false;
 	}
 
+	return true;
+}
+
+static void
+cix_event_managed_drain(struct cix_event *event)
+{
+	int64_t value;
+	ssize_t r;
+
+	assert(event->managed == true);
+
+	for (;;) {
+		r = read(event->fd, &value, sizeof value);
+		if (r > 0)
+			return;
+
+		if (errno == EINTR)
+			continue;
+
+		if (errno == EAGAIN)
+			return;
+
+		fprintf(stderr, "failed to drain managed event\n");
+		return;
+	}
+	
 	return;
 }
 
-static void cix_event_managed_drain(struct cix_event *);
-
-void
+bool
 cix_event_manager_run(struct cix_event_manager *manager)
 {
 	int r, i;
@@ -42,8 +64,8 @@ cix_event_manager_run(struct cix_event_manager *manager)
 			if (errno == EINTR)
 				continue;
 
-			perror("event loop");
-			exit(EXIT_FAILURE);
+			fprintf(stderr, "event loop failed\n");
+			return false;
 		}
 
 		for (i = 0; i < r; ++i) {
@@ -61,7 +83,7 @@ cix_event_manager_run(struct cix_event_manager *manager)
 		}
 	}
 
-	return;
+	return true;
 }
 
 bool
@@ -148,32 +170,6 @@ cix_event_managed_trigger(struct cix_event *event)
 	}
 
 	return false;
-}
-
-static void
-cix_event_managed_drain(struct cix_event *event)
-{
-	int64_t value;
-	ssize_t r;
-
-	assert(event->managed == true);
-
-	for (;;) {
-		r = read(event->fd, &value, sizeof value);
-		if (r > 0)
-			return;
-
-		if (errno == EINTR)
-			continue;
-
-		if (errno == EAGAIN)
-			return;
-
-		fprintf(stderr, "failed to drain managed event\n");
-		return;
-	}
-	
-	return;
 }
 
 bool
