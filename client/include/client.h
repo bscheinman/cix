@@ -41,7 +41,6 @@ struct cix_client_callbacks {
 struct cix_client {
 	int fd;
 	struct cix_event event;
-	struct cix_event_manager event_manager;
 
 	struct cix_buffer *read_buf;
 	struct cix_buffer *write_buf;
@@ -53,6 +52,13 @@ struct cix_client {
 
 bool cix_client_init(struct cix_client *, const char *, uint16_t,
     struct cix_client_callbacks *, void *);
+
+static inline struct cix_event *
+cix_client_event(struct cix_client *client)
+{
+
+	return &client->event;
+}
 
 /*
  * This interface allows users to send multiple messages in a single batch

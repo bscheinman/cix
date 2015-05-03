@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ck_pr.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <netdb.h>
 #include <pthread.h>
@@ -13,15 +14,23 @@
 #include <sys/types.h>
 
 #include "book.h"
+#include "buffer.h"
 #include "event.h"
 #include "market.h"
 #include "messages.h"
 #include "misc.h"
 #include "session.h"
 #include "trade_data.h"
+#include "worq.h"
 
 /* XXX: Make these configurable */
 #define CIX_SESSION_ACCEPT_SOCKET "13579"
+#define CIX_SESSION_BUFFER_SIZE (1 << 14)
+#define CIX_SESSION_INTERNAL_QUEUE_SIZE (1 << 16)
+
+struct cix_session_internal_event {
+	struct cix_message message;
+};
 
 enum cix_session_read_state {
 	/* XXX: Ignore authentication and identification for now */
@@ -31,21 +40,31 @@ enum cix_session_read_state {
 
 struct cix_session {
 	int fd;
-	cix_event_t event;
+	struct cix_event fd_event;
+
+	/* XXX: replace this with a buffer to reduce syscalls */
 	struct {
 		enum cix_session_read_state state;
 		struct cix_message message;
 		size_t payload_target;
 		size_t bytes_read;
 	} read;
+
+	struct cix_buffer *write_buf;
+	struct {
+		struct cix_worq queue;
+		struct cix_event event;
+	} internal;
+
 	struct cix_session_thread *thread;
 	cix_user_id_t user_id;
 };
 
 struct cix_session_thread {
-	cix_event_manager_t event_manager;
+	struct cix_event_manager event_manager;
+
 	struct {
-		cix_event_t event;
+		struct cix_event event;
 
 		/*
 		 * XXX: Right now the accept thread will write an accepted fd
@@ -64,6 +83,7 @@ struct cix_session_thread {
 		 */
 		int waiting;
 	} accept;
+
 	pthread_t tid;
 	struct cix_market *market;
 };
@@ -72,28 +92,6 @@ static struct cix_session_thread *cix_session_threads;
 static size_t cix_session_thread_count;
 
 static unsigned int cix_global_user_id;
-
-/* XXX: Use slab allocation instead of calling malloc each time */
-static struct cix_session *
-cix_session_create(int fd, struct cix_session_thread *thread)
-{
-	struct cix_session *session;
-
-	session = malloc(sizeof *session);
-	if (session == NULL) {
-		return NULL;
-	}
-
-	session->fd = fd;
-	session->read.state = CIX_READ_STATE_MESSAGE_TYPE;
-	session->read.bytes_read = 0;
-
-	/* XXX: Authenticate */
-	session->user_id = ck_pr_faa_uint(&cix_global_user_id, 1);
-	session->thread = thread;
-
-	return session;
-}
 
 static void
 cix_session_process_message(struct cix_session *session,
@@ -129,27 +127,30 @@ cix_session_process_message(struct cix_session *session,
 	return;
 }
 
-static void cix_session_thread_session_remove(struct cix_session_thread *thread,
-    struct cix_session *session);
-
 static void
-cix_session_close(struct cix_session *session, int fd)
+cix_session_close(struct cix_session *session)
 {
 
-	cix_session_thread_session_remove(session->thread, session);
-	while (close(fd) == -1 && errno == EINTR);
+	while (close(session->fd) == -1 && errno == EINTR);
+
+	cix_buffer_destroy(&session->write_buf);
+	cix_worq_destroy(&session->internal.queue);
+	cix_event_remove(&session->thread->event_manager, &session->fd_event);
+	cix_event_remove(&session->thread->event_manager,
+	    &session->internal.event);
+	free(session);
 	return;
 }
 
 static void
-cix_session_read(struct cix_session *session, int fd)
+cix_session_read(struct cix_session *session)
 {
 	ssize_t r;
 
 	switch (session->read.state) {
 	case CIX_READ_STATE_MESSAGE_TYPE:
 read_type:
-		r = read(fd,
+		r = read(session->fd,
 		    &session->read.message.type + session->read.bytes_read,
 		    sizeof(session->read.message.type) -
 		    session->read.bytes_read);
@@ -183,7 +184,7 @@ read_type:
 
 	case CIX_READ_STATE_MESSAGE_DATA:
 read_payload:
-		r = read(fd,
+		r = read(session->fd,
 		    &session->read.message.payload + session->read.bytes_read,
 		    session->read.payload_target - session->read.bytes_read);
 		if (r == -1) {
@@ -218,36 +219,80 @@ read_payload:
 }
 
 static void
-cix_session_write_flush(struct cix_session *session, int fd)
+cix_session_write_flush(struct cix_session *session)
 {
+	struct cix_buffer_result result;
 
-	
+	cix_buffer_fd_write(session->write_buf, session->fd, 0, 0, &result);
+	switch (result.code) {
+	case CIX_BUFFER_OK:
+		break;
+	case CIX_BUFFER_PARTIAL:
+		fprintf(stderr, "partial session write\n");
+		break;
+	case CIX_BUFFER_BLOCKED:
+		fprintf(stderr, "session write blocked\n");
+		break;
+	case CIX_BUFFER_ERROR:
+		fprintf(stderr, "session write error\n");
+		break;
+	default:
+		fprintf(stderr, "unrecognized buffer state\n");
+		break;
+	}
+
+	return;
 }
 
 static void
-cix_session_handler(cix_event_t *event, cix_event_flags_t flags, void *closure)
+cix_session_message(cix_event_t *event, cix_event_flags_t flags, void *closure)
 {
-	struct cix_session_thread *thread = closure;
-	struct cix_session *session =
-	    container_of(event, struct cix_session, event);
-
-	(void)flags;
-	(void)thread;
-	(void)session;
+	struct cix_session *session = closure;
 
 	if (cix_event_flags_close(flags) == true) {
-		cix_session_close(session, cix_event_fd(event));
+		cix_session_close(session);
 		return;
 	}
 
 	if (cix_event_flags_read(flags) == true) {
-		cix_session_read(session, cix_event_fd(event));
+		cix_session_read(session);
 	}
 
 	if (cix_event_flags_write(flags) == true) {
-		cix_session_write_flush(session, cix_event_fd(event));
+		cix_session_write_flush(session);
 	}
 
+	return;
+}
+
+static void
+cix_session_internal_event(struct cix_event *event, cix_event_flags_t flags,
+    void *closure)
+{
+	struct cix_session *session = closure;
+	struct cix_worq *queue = &session->internal.queue;
+
+	(void)flags;
+
+	for (;;) {
+		struct cix_session_internal_event *internal;
+		size_t message_size;
+		
+		internal = cix_worq_pop(queue, CIX_WORQ_WAIT_BLOCK_SLOT);
+		if (internal == NULL) {
+			break;
+		}
+
+		message_size = cix_message_length(internal->message.type) + 1;
+		if (cix_buffer_append(&session->write_buf, &internal->message,
+		    message_size) == false) {
+			fprintf(stderr, "failed to write to session buffer\n");
+		}
+		
+		cix_worq_complete(queue, internal);
+	}
+
+	cix_session_write_flush(session);
 	return;
 }
 
@@ -258,6 +303,7 @@ cix_session_socket(void)
 	struct addrinfo *info;
 	int r, fd;
 	int one = 1;
+	int flags;
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -292,6 +338,13 @@ cix_session_socket(void)
 		exit(EXIT_FAILURE);
 	}
 
+	flags = fcntl(fd, F_GETFL);
+	r = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+	if (r == -1) {
+		perror("setting non-blocking I/O");
+		exit(EXIT_FAILURE);
+	}
+
 	r = listen(fd, 8);
 	if (r == -1) {
 		perror("listening to socket");
@@ -314,12 +367,21 @@ cix_session_accept(void *unused)
 	for (;;) {
 		struct sockaddr client_addr;
 		socklen_t client_addr_len = sizeof client_addr;
+		int flags;
 
 		fd = accept(socket_fd, &client_addr, &client_addr_len);
 		if (fd == -1) {
 			if (errno != EAGAIN)
 				perror("accepting connection");
 
+			continue;
+		}
+
+		flags = fcntl(fd, F_GETFL);
+		if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+			fprintf(stderr, "failed to make connection "
+			    "non-blocking: %s\n", strerror(errno));
+			while (close(fd) && errno == EINTR);
 			continue;
 		}
 
@@ -361,6 +423,72 @@ cix_session_accept(void *unused)
 	return NULL;
 }
 
+/* XXX: Use slab allocation instead of calling malloc each time */
+static struct cix_session *
+cix_session_create(int fd, struct cix_session_thread *thread)
+{
+	struct cix_session *session;
+
+	session = malloc(sizeof *session);
+	if (session == NULL) {
+		return NULL;
+	}
+
+	if (cix_event_init_fd(&session->fd_event, fd, cix_session_message,
+	    session) == false) {
+		fprintf(stderr, "failed to create fd listener\n");
+		goto fd_fail;
+	}
+
+	if (cix_buffer_init(&session->write_buf, CIX_SESSION_BUFFER_SIZE) ==
+	    false) {
+		fprintf(stderr, "failed to create session buffer\n");
+		goto buffer_fail;
+	}
+
+	if (cix_worq_init(&session->internal.queue,
+	    CIX_SESSION_INTERNAL_QUEUE_SIZE,
+	    sizeof(struct cix_session_internal_event)) == false) {
+		fprintf(stderr, "failed to create internal event queue\n");
+		goto queue_fail;
+	}
+
+	if (cix_event_init_managed(&session->internal.event,
+	    cix_session_internal_event, session) == false) {
+		fprintf(stderr, "failed to create internal event listener\n");
+		goto event_fail;
+	}
+
+	if (cix_worq_event_subscribe(&session->internal.queue,
+	    &session->internal.event) == false) {
+		fprintf(stderr, "failed to subscribe to internal event "
+		    "queue\n");
+		goto subscribe_fail;
+	}
+
+	session->fd = fd;
+	session->read.state = CIX_READ_STATE_MESSAGE_TYPE;
+	session->read.bytes_read = 0;
+
+	/* XXX: Authenticate */
+	session->user_id = ck_pr_faa_uint(&cix_global_user_id, 1);
+	session->thread = thread;
+
+	return session;
+
+subscribe_fail:
+event_fail:
+	cix_worq_destroy(&session->internal.queue);
+
+queue_fail:
+	cix_buffer_destroy(&session->write_buf);
+
+buffer_fail:
+fd_fail:
+	free(session);
+	return NULL;
+}
+
 static void
 cix_session_thread_accept(cix_event_t *event, cix_event_flags_t flags,
     void *closure)
@@ -379,25 +507,14 @@ cix_session_thread_accept(cix_event_t *event, cix_event_flags_t flags,
 		exit(EXIT_FAILURE);
 	}
 
-	if (cix_event_init_fd(&session->event, session->fd, cix_session_handler,
-	    thread) == false ||
-	    cix_event_add(&thread->event_manager, &session->event) == false) {
-		fprintf(stderr, "failed to register session event\n");
+	if (cix_event_add(&thread->event_manager, &session->fd_event) ==
+	    false || cix_event_add(&thread->event_manager,
+	    &session->internal.event) == false) {
+		fprintf(stderr, "failed to register session events\n");
 		exit(EXIT_FAILURE);
 	}
 
 	thread->accept.waiting = -1;
-	return;
-}
-
-static void
-cix_session_thread_session_remove(struct cix_session_thread *thread,
-    struct cix_session *session)
-{
-
-	assert(session->thread == thread);
-
-	cix_event_remove(&thread->event_manager, &session->event);
 	return;
 }
 
@@ -410,18 +527,21 @@ cix_session_thread(void *closure)
 
 	if (cix_event_init_managed(&thread->accept.event,
 	    cix_session_thread_accept, thread) == false) {
-		fputs("failed to initialize session thread accept event\n",
-		    stderr);
+		fprintf(stderr, "failed to initialize session thread accept "
+		    "event\n");
 		exit(EXIT_FAILURE);
 	}
-
+	
 	if (cix_event_add(&thread->event_manager, &thread->accept.event) ==
 	    false) {
 		fputs("failed to initialize session accept queue\n", stderr);
 		exit(EXIT_FAILURE);
 	}
 
-	cix_event_manager_run(&thread->event_manager);
+	if (cix_event_manager_run(&thread->event_manager) == false) {
+		fprintf(stderr, "failed to run session event loop\n");
+	}
+
 	return NULL;
 }
 
@@ -480,4 +600,35 @@ cix_session_user_id(const struct cix_session *session)
 {
 
 	return session->user_id;
+}
+
+bool
+cix_session_execution_report(struct cix_session *session,
+    cix_order_id_t order_id, cix_price_t price, cix_quantity_t quantity)
+{
+	struct cix_session_internal_event *event;
+	struct cix_worq *queue = &session->internal.queue;
+	struct cix_message *message;
+
+	event = cix_worq_claim(queue);
+
+	/*
+	 * XXX: Should just block here instead
+	 * XXX: Add a flag to worq_claim to indicate blocking similar
+	 * to cix_worq_pop behavior.
+	 */
+	if (event == NULL) {
+		fprintf(stderr, "failed to report execution: message queue "
+		    "is full\n");
+		return false;
+	}
+
+	message = &event->message;
+	message->type = CIX_MESSAGE_EXECUTION;
+	message->payload.execution.order_id = order_id;
+	message->payload.execution.price = price;
+	message->payload.execution.quantity = quantity;
+
+	cix_worq_publish(queue, event);
+	return true;
 }

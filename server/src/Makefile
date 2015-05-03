@@ -10,7 +10,8 @@ OBJECTS=book.o		\
 INCLUDES=-I../include -I../../shared/include
 LDFLAGS=-pthread
 SHARED_LIBS=../../shared/src
-SHARED_OBJS=	$(SHARED_LIBS)/event.o		\
+SHARED_OBJS=	$(SHARED_LIBS)/buffer.o		\
+		$(SHARED_LIBS)/event.o		\
 		$(SHARED_LIBS)/heap.o		\
 		$(SHARED_LIBS)/id_generator.o	\
 		$(SHARED_LIBS)/vector.o		\

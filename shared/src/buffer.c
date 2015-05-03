@@ -93,7 +93,7 @@ cix_buffer_fd_read(struct cix_buffer **b, int fd, size_t bytes,
 
 	(void)flags;
 
-	result->value.bytes = 0;
+	result->bytes = 0;
 
 	if (bytes > 0) {
 		target = bytes;
@@ -104,7 +104,6 @@ cix_buffer_fd_read(struct cix_buffer **b, int fd, size_t bytes,
 	for (;;) {
 		struct cix_buffer *buffer;
 		ssize_t r;
-		size_t bytes_read;
 
 		if (cix_buffer_expand(b, target) == false) {
 			result->code = CIX_BUFFER_ERROR;
@@ -115,31 +114,43 @@ cix_buffer_fd_read(struct cix_buffer **b, int fd, size_t bytes,
 		r = read(fd, buffer->data + buffer->length, target);
 
 		if (r < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+
 			fprintf(stderr, "Error reading from socket: %s\n",
 			    strerror(errno));
 			result->code = CIX_BUFFER_ERROR;
-			result->value.error = CIX_BUFFER_ERROR_FD;
+			result->error = CIX_BUFFER_ERROR_FD;
 			return;
 		}
 
-		bytes_read = (size_t)r;
-		buffer->length += bytes_read;
+		if (r == 0) {
+			break;
+		}
+
+		result->bytes += (size_t)r;
+		buffer->length += (size_t)r;
 
 		if (bytes > 0) {
-			if (result->value.bytes == bytes) {
-				result->code = CIX_BUFFER_OK;
-			} else {
-				result->code = CIX_BUFFER_PARTIAL;
+			if (result->bytes == bytes) {
+				break;
 			}
-			result->value.bytes = bytes_read;
-			return;
-		}
 
-		if (bytes_read < target) {
-			result->code = CIX_BUFFER_OK;
-			result->value.bytes += bytes_read;
-			return;
+			if (flags & CIX_BUFFER_FD_RETRY_PARTIAL) {
+				continue;
+			}
+
+			break;
+		} else if (result->bytes < target) {
+			break;
 		}
+	}
+
+	if (result->bytes == bytes || bytes == 0) {
+		result->code = CIX_BUFFER_OK;
+	} else {
+		result->code = CIX_BUFFER_PARTIAL;
 	}
 
 	return;
@@ -149,36 +160,68 @@ void
 cix_buffer_fd_write(struct cix_buffer *buffer, int fd, size_t bytes,
     unsigned long flags, struct cix_buffer_result *result)
 {
-	size_t target, bytes_written;
-	ssize_t w;
+	size_t target;
 
-	(void)flags;
-
-	result->value.bytes = 0;
+	result->bytes = 0;
 
 	target = cix_buffer_length(buffer);
+	if (target == 0) {
+		result->code = CIX_BUFFER_OK;
+		return;
+	}
+
 	if (bytes > 0 && bytes < target) {
 		target = bytes;
 	}
 
-	w = write(fd, buffer->data, target);
+	for (;;) {
+		ssize_t w = write(fd, buffer->data, target - result->bytes);
 
-	if (w < 0) {
+		if (w == 0) {
+			break;
+		}
+
+		if (w > 0) {
+			result->bytes += (size_t)w;
+
+			if (result->bytes == target) {
+				break;
+			}
+
+			if (flags & CIX_BUFFER_FD_RETRY_PARTIAL) {
+				continue;
+			}
+
+			break;
+		}
+
+		if (errno == EINTR) {
+			continue;
+		}
+
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (flags & CIX_BUFFER_FD_BLOCK) {
+				continue;
+			}
+			
+			result->code = CIX_BUFFER_BLOCKED;
+			return;
+		}
+
 		fprintf(stderr, "Error writing to socket: %s\n",
 		    strerror(errno));
 		result->code = CIX_BUFFER_ERROR;
-		result->value.error = CIX_BUFFER_ERROR_FD;
+		result->error = CIX_BUFFER_ERROR_FD;
 		return;
 	}
 
-	bytes_written = (size_t)w;
-	cix_buffer_drain(buffer, bytes_written);
+	cix_buffer_drain(buffer, result->bytes);
 	
-	if (bytes_written == target) {
+	if (result->bytes == target) {
 		result->code = CIX_BUFFER_OK;
 	} else {
 		result->code = CIX_BUFFER_PARTIAL;
 	}
-	result->value.bytes = bytes_written;
+
 	return;
 }

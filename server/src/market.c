@@ -126,9 +126,15 @@ cix_market_thread_init(struct cix_market_thread *thread, unsigned int index)
 		return false;
 	}
 
-	if (cix_event_init_managed(&thread->event,
-	    cix_market_thread_process, thread) == false) {
+	if (cix_event_init_managed(&thread->event, cix_market_thread_process,
+	    thread) == false) {
 		fprintf(stderr, "failed to initialize market event listener\n");
+		return false;
+	}
+
+	if (cix_worq_event_subscribe(&thread->queue, &thread->event) ==
+	    false) {
+		fprintf(stderr, "failed to subscribe to market queue\n");
 		return false;
 	}
 
@@ -258,8 +264,8 @@ cix_market_run(struct cix_market *market)
 		struct cix_market_thread *thread = &market->threads[i];
 		int r;
 
-		r = pthread_create(&thread->tid, NULL,
-		    cix_market_thread_run, thread);
+		r = pthread_create(&thread->tid, NULL, cix_market_thread_run,
+		    thread);
 		if (r == 0) {
 			continue;
 		}
@@ -299,6 +305,5 @@ cix_market_order(struct cix_market *market, struct cix_message_order *order,
 	memcpy(&context->order, order, sizeof context->order);
 
 	cix_worq_publish(&thread->queue, context);
-	cix_event_managed_trigger(&thread->event);
 	return true;
 }

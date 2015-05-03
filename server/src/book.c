@@ -123,6 +123,14 @@ cix_book_execution(struct cix_book *book, struct cix_order *bid,
 
 	bid->remaining -= execution.quantity;
 	offer->remaining -= execution.quantity;
+
+	if ((cix_session_execution_report(bid->session, bid->id,
+	    execution.price, execution.quantity) == false) |
+	    (cix_session_execution_report(offer->session, offer->id,
+	    execution.price, execution.quantity) == false)) {
+		fprintf(stderr, "failed to report execution to clients\n");
+	}
+
 	return true;
 }
 

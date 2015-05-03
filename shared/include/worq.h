@@ -1,8 +1,9 @@
 #ifndef _CIX_WORQ_H
 #define _CIX_WORQ_H
 
-#include <inttypes.h>
+#include <ck_cc.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 enum cix_worq_wait {
@@ -27,15 +28,19 @@ enum cix_worq_wait {
  * time that they finish writing to it.
  */
 
-struct cix_worq_item;
+struct cix_event;
 
 struct cix_worq {
 	unsigned char *items;
+
 	size_t slot_size;
 	unsigned int size;
 	uint64_t mask;
-	uint64_t consume_cursor;
-	uint64_t produce_cursor;
+
+	uint64_t consume_cursor CK_CC_CACHELINE;
+	uint64_t produce_cursor CK_CC_CACHELINE;
+
+	struct cix_event *event;
 };
 
 bool cix_worq_init(struct cix_worq *, size_t, unsigned int);
@@ -60,5 +65,10 @@ void *cix_worq_pop(struct cix_worq *, enum cix_worq_wait);
  * Mark consumed slot as processed and ready for reuse.
  */
 void cix_worq_complete(struct cix_worq *, void *);
+
+/*
+ * Provide an event that will be triggered whenever new items become available.
+ */
+bool cix_worq_event_subscribe(struct cix_worq *, struct cix_event *event);
 
 #endif /* _CIX_WORQ_H */

@@ -21,9 +21,13 @@ do {						\
 } while(0);
 
 struct stress_thread {
+	struct cix_event_manager event_manager;
+	struct cix_event timer_event;
+
 	struct cix_client client;
 	struct cix_message_order *orders;
 	pthread_t thread;
+	unsigned long messages_sent;
 };
 
 static struct {
@@ -32,9 +36,12 @@ static struct {
 
 	unsigned int n_order;
 	unsigned int n_thread;
+	
+	unsigned long order_limit;
 
 	/* Delay between messages on a single thread, in us */
 	unsigned int delay;
+	unsigned int batch_size;
 
 	unsigned int min_price;
 	unsigned int max_price;
@@ -110,8 +117,8 @@ stress_thread_init_orders(struct stress_thread *thread)
 		    stress_config.max_price);
 		order->quantity = stress_random_range(
 		    stress_config.min_quantity, stress_config.max_quantity);
-		order->side = stress_random_range(CIX_TRADE_SIDE_BUY,
-		    CIX_TRADE_SIDE_SELL);
+		order->side = (i & 1) ? CIX_TRADE_SIDE_BUY :
+		    CIX_TRADE_SIDE_SELL;
 		u = stress_random_range(0, cix_vector_length(
 		    stress_config.symbols) - 1);
 		strcpy(order->symbol.symbol,
@@ -123,15 +130,70 @@ stress_thread_init_orders(struct stress_thread *thread)
 }
 
 static void
-stress_thread_init(struct stress_thread *thread)
+stress_execution_handler(struct cix_client_execution *exec, void *closure)
 {
-	struct cix_client_callbacks callbacks = { NULL, NULL };
+	
+	(void)closure;
 
-	if (cix_client_init(&thread->client, stress_config.address,
-	    stress_config.port, &callbacks, NULL) == false) {
-		fprintf(stderr, "failed to connect\n");
-		exit(EXIT_FAILURE);
+	printf("received execution for order %" CIX_PR_ID " (%" CIX_PR_Q
+	    " shares @ %" CIX_PR_P ")\n", exec->order_id, exec->quantity,
+	    exec->price);
+	return;
+}
+
+static void
+stress_thread_send_orders(struct cix_event *event, cix_event_flags_t flags,
+    void *closure)
+{
+	struct stress_thread *thread = closure;
+
+	if (stress_config.batch_size <= 1) {
+		if (cix_client_send_order(&thread->client,
+		    &thread->orders[thread->messages_sent & 1]) == false) {
+			fprintf(stderr, "failed to send order\n");
+			/* XXX: Handle this more gracefully */
+			exit(EXIT_FAILURE);
+		}
+		++thread->messages_sent;
+	} else {
+		unsigned int i;
+
+		cix_client_batch_start(&thread->client);
+
+		for (i = 0; i < stress_config.batch_size; ++i) {
+			if (cix_client_send_order(&thread->client,
+			    &thread->orders[thread->messages_sent & 1]) ==
+			    false) {
+				fprintf(stderr, "failed to send order\n");
+				/* XXX: Handle this more gracefully */
+				exit(EXIT_FAILURE);
+			}
+			++thread->messages_sent;
+		}
+
+		if (cix_client_batch_end(&thread->client) == false) {
+			fprintf(stderr, "failed to send order\n");
+			/* XXX: Handle this more gracefully */
+			exit(EXIT_FAILURE);
+		}
 	}
+
+	if (stress_config.order_limit > 0 && thread->messages_sent >=
+	    stress_config.order_limit) {
+		pthread_exit(NULL);
+	}
+
+	return;
+}
+
+static void *
+stress_thread_run(void *closure)
+{
+	struct stress_thread *thread = closure;
+	struct cix_client_callbacks callbacks = {
+		.ack = NULL,
+		.exec = stress_execution_handler
+	};
 
 	thread->orders = malloc(stress_config.n_order *
 	    sizeof(*thread->orders));
@@ -139,47 +201,38 @@ stress_thread_init(struct stress_thread *thread)
 		fprintf(stderr, "failed to create order pool\n");
 		exit(EXIT_FAILURE);
 	}
-
 	stress_thread_init_orders(thread);
-	return;
-}
 
-static void *
-stress_thread_run(void *p)
-{
-	struct stress_thread *thread = p;
-	unsigned int i = 0;
+	if (cix_event_manager_init(&thread->event_manager) == false) {
+		fprintf(stderr, "failed to initialize event loop\n");
+		exit(EXIT_FAILURE);
+	}
 
-	for (i = 0; ; ++i) {
-		struct timespec wait, remaining;
+	if (cix_event_init_timer(&thread->timer_event,
+	    stress_thread_send_orders, thread) == false ||
+	    cix_event_timer_set(&thread->timer_event,
+	    stress_config.delay * 1000) == false ||
+	    cix_event_add(&thread->event_manager, &thread->timer_event) ==
+	    false) {
+		fprintf(stderr, "failed to create timer event\n");
+		exit(EXIT_FAILURE);
+	}
 
-		if (i >= stress_config.n_order) {
-			i -= stress_config.n_order;
-		}
+	if (cix_client_init(&thread->client, stress_config.address,
+	    stress_config.port, &callbacks, NULL) == false) {
+		fprintf(stderr, "failed to connect\n");
+		exit(EXIT_FAILURE);
+	}
 
-		if (cix_client_send_order(&thread->client,
-		    &thread->orders[i]) == false) {
-			fprintf(stderr, "failed to send order\n");
-			/* XXX: Handle this more gracefully */
-			exit(EXIT_FAILURE);
-		}
+	if (cix_event_add(&thread->event_manager,
+	    cix_client_event(&thread->client)) == false) {
+		fprintf(stderr, "failed to setup client event\n");
+		exit(EXIT_FAILURE);
+	}
 
-		if (stress_config.delay == 0) {
-			continue;
-		}
-
-		/* XXX: Confirm that delay is less than 1 second */
-		wait.tv_sec = 0;
-		wait.tv_nsec = 1000 * stress_config.delay;
-		
-		while (nanosleep(&wait, &remaining) == -1) {
-			if (errno != EINTR) {
-				fprintf(stderr, "error sleeping\n");
-				exit(EXIT_FAILURE);
-			}
-
-			memcpy(&wait, &remaining, sizeof wait);
-		}
+	if (cix_event_manager_run(&thread->event_manager) == false) {
+		fprintf(stderr, "event loop failed\n");
+		exit(EXIT_FAILURE);
 	}
 
 	return NULL;
@@ -194,8 +247,8 @@ stress_config_init(void)
 	stress_config.n_order = 1000;
 	stress_config.min_price = 490;
 	stress_config.max_price = 510;
-	stress_config.min_quantity = 10;
-	stress_config.max_quantity = 1000;
+	stress_config.min_quantity = 50;
+	stress_config.max_quantity = 500;
 
 	if (cix_vector_init(&stress_config.symbols, sizeof(cix_symbol_t), 32) ==
 	    false) {
@@ -247,24 +300,36 @@ main(int argc, char **argv)
 {
 	struct option options[] = {
 		{ "address", required_argument, NULL, 'a' },
+		{ "batch-size", required_argument, NULL, 'b' },
 		{ "delay", required_argument, NULL, 'd' },
+		{ "orders", required_argument, NULL, 'n' },
 		{ "port", required_argument, NULL, 'p' },
 		{ "threads", required_argument, NULL, 't' },
 		{ NULL, 0, NULL, 0 }
 	};
 	int a;
 	unsigned int i;
+	unsigned long total_messages;
 
 	stress_random_init();
 	stress_config_init();
 
-	while ((a = getopt_long(argc, argv, "a:d:p:t:", options, NULL)) != -1) {
+	while ((a = getopt_long(argc, argv, "a:b:d:n:p:t:", options, NULL)) !=
+	    -1) {
 		switch(a) {
 		case 'a':
 			stress_config.address = optarg;
 			break;
+		case 'b':
+			stress_config.batch_size = parse_positive(optarg,
+			    "batch size");
+			break;
 		case 'd':
 			stress_config.delay = parse_positive(optarg, "delay");
+			break;
+		case 'n':
+			stress_config.order_limit = parse_positive(optarg,
+			    "order limit");
 			break;
 		case 'p': {
 			unsigned long l = parse_positive(optarg, "port");
@@ -319,7 +384,6 @@ main(int argc, char **argv)
 	}
 
 	for (i = 0; i < stress_config.n_thread; ++i) {
-		stress_thread_init(&stress_threads[i]);
 		if (pthread_create(&stress_threads[i].thread, NULL,
 		    stress_thread_run, &stress_threads[i]) != 0) {
 			fprintf(stderr, "failed to start threads\n");
@@ -327,12 +391,15 @@ main(int argc, char **argv)
 		}
 	}
 
+	total_messages = 0;
 	for (i = 0; i < stress_config.n_thread; ++i) {
 		if (pthread_join(stress_threads[i].thread, NULL) != 0) {
 			fprintf(stderr, "failed to join thread\n");
 			exit(EXIT_FAILURE);
 		}
+		total_messages += stress_threads[i].messages_sent;
 	}
 
+	printf("sent %lu total messages\n", total_messages);
 	return 0;
 }

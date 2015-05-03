@@ -1,13 +1,13 @@
 #ifndef _CIX_MESSAGES_H
 #define _CIX_MESSAGES_H
 
-#include <inttypes.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "misc.h"
 
-#define CIX_SYMBOL_MAX 7
-#define CIX_EXTERNAL_ID_MAX 16
+#define CIX_SYMBOL_MAX 6
+#define CIX_EXTERNAL_ID_MAX 14
 
 typedef uint64_t cix_order_id_t;
 typedef uint64_t cix_user_id_t;
@@ -16,7 +16,7 @@ typedef uint64_t cix_execution_id_t;
 
 typedef struct {
 	char symbol[CIX_SYMBOL_MAX + 1];
-} cix_symbol_t;
+} CIX_STRUCT_PACKED cix_symbol_t;
 typedef uint32_t cix_quantity_t;
 #define CIX_PR_Q	PRIu32
 
@@ -31,7 +31,7 @@ typedef uint32_t cix_price_t;
 enum cix_message_type {
 	CIX_MESSAGE_ORDER = 0,
 	CIX_MESSAGE_CANCEL,
-	CIX_MESSAGE_TRADE,
+	CIX_MESSAGE_EXECUTION,
 	CIX_MESSAGE_ACK
 };
 
@@ -57,10 +57,10 @@ enum cix_order_status {
  */
 struct cix_message_order {
 	cix_symbol_t symbol;
-	cix_quantity_t quantity;
-	cix_price_t price;
+	cix_quantity_t quantity CIX_STRUCT_PACKED;
+	cix_price_t price CIX_STRUCT_PACKED;
 	uint8_t side;
-	char external_id[CIX_EXTERNAL_ID_MAX];
+	char external_id[CIX_EXTERNAL_ID_MAX + 1];
 } CIX_STRUCT_PACKED;
 
 struct cix_message_cancel {
@@ -68,19 +68,21 @@ struct cix_message_cancel {
 } CIX_STRUCT_PACKED;
 
 struct cix_message_ack {
-	char external_id[CIX_EXTERNAL_ID_MAX];
+	char external_id[CIX_EXTERNAL_ID_MAX + 1];
 	cix_order_id_t internal_id;
 	uint8_t status;
-};
+} CIX_STRUCT_PACKED;
 
-struct cix_message_trade {
-	/* XXX */
+struct cix_message_execution {
+	cix_order_id_t order_id CIX_STRUCT_PACKED;
+	cix_price_t price CIX_STRUCT_PACKED;
+	cix_quantity_t quantity CIX_STRUCT_PACKED;
 } CIX_STRUCT_PACKED;
 
 union cix_message_payload {
 	struct cix_message_order order;
 	struct cix_message_cancel cancel;
-	struct cix_message_trade trade;
+	struct cix_message_execution execution;
 	struct cix_message_ack ack;
 } CIX_STRUCT_PACKED;
 
@@ -98,8 +100,8 @@ cix_message_length(enum cix_message_type type)
 		return sizeof(struct cix_message_order);
 	case CIX_MESSAGE_CANCEL:
 		return sizeof(struct cix_message_cancel);
-	case CIX_MESSAGE_TRADE:
-		return sizeof(struct cix_message_trade);
+	case CIX_MESSAGE_EXECUTION:
+		return sizeof(struct cix_message_execution);
 	case CIX_MESSAGE_ACK:
 		return sizeof(struct cix_message_ack);
 	default:

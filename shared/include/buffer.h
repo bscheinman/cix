@@ -23,14 +23,17 @@ struct cix_buffer_result {
 		CIX_BUFFER_ERROR
 	} code;
 
-	union {
-		size_t bytes;
-		enum {
-			CIX_BUFFER_ERROR_ALLOC,
-			CIX_BUFFER_ERROR_FD
-		} error;
-	} value;
+	size_t bytes;
+	enum {
+		CIX_BUFFER_ERROR_ALLOC,
+		CIX_BUFFER_ERROR_FD
+	} error;
 };
+
+/* XXX */
+#define CIX_BUFFER_FD_NOEXPAND			(1UL << 0)
+#define CIX_BUFFER_FD_BLOCK			(1UL << 1)
+#define CIX_BUFFER_FD_RETRY_PARTIAL		(1UL << 2)
 
 void cix_buffer_fd_read(struct cix_buffer **, int, size_t, unsigned long,
     struct cix_buffer_result *);

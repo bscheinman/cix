@@ -21,6 +21,10 @@ cix_client_receive_ack(const struct cix_client *client,
 {
 	struct cix_client_ack ack;
 
+	if (client->callbacks.ack == NULL) {
+		return;
+	}
+
 	ack.client_id = message->external_id;
 	ack.server_id = message->internal_id;
 	switch (message->status) {
@@ -36,16 +40,13 @@ cix_client_receive_ack(const struct cix_client *client,
 		return;
 	}
 
-	if (client->callbacks.ack != NULL) {
-		client->callbacks.ack(&ack, client->closure);
-	}
-
+	client->callbacks.ack(&ack, client->closure);
 	return;
 }
 
 static void
 cix_client_receive_exec(const struct cix_client *client,
-    const struct cix_message_trade *message)
+    const struct cix_message_execution *message)
 {
 	struct cix_client_execution exec;
 
@@ -53,7 +54,15 @@ cix_client_receive_exec(const struct cix_client *client,
 	(void)message;
 	(void)exec;
 
-	/* XXX */
+	if (client->callbacks.exec == NULL) {
+		return;
+	}
+
+	exec.order_id = message->order_id;
+	exec.quantity = message->quantity;
+	exec.price = message->price;
+	client->callbacks.exec(&exec, client->closure);
+
 	return;
 }
 
@@ -70,12 +79,13 @@ cix_client_receive(struct cix_client *client)
 		return;
 	}
 
+	processed = 0;
 	length = cix_buffer_length(client->read_buf);
-	for (processed = 0; processed < length; processed += target + 1) {
+	while (processed < length) {
 		struct cix_message *message;
 
 		message = (struct cix_message *)
-		    (cix_buffer_length(client->read_buf) + processed);
+		    (cix_buffer_data(client->read_buf) + processed);
 		target = cix_message_length(message->type);
 
 		if (processed + target + 1 > length) {
@@ -86,15 +96,17 @@ cix_client_receive(struct cix_client *client)
 		case CIX_MESSAGE_ACK:
 			cix_client_receive_ack(client, &message->payload.ack);
 			break;
-		case CIX_MESSAGE_TRADE:
+		case CIX_MESSAGE_EXECUTION:
 			cix_client_receive_exec(client,
-			    &message->payload.trade);
+			    &message->payload.execution);
 			break;
 		default:
 			fprintf(stderr, "Unrecognized message type %u\n",
 			    (unsigned)message->type);
 			break;
 		}
+
+		processed += target + 1;
 	}
 
 	cix_buffer_drain(client->read_buf, processed);
@@ -132,7 +144,8 @@ cix_client_send(struct cix_client *client)
 }
 
 static void
-cix_client_event(struct cix_event *event, cix_event_flags_t flags, void *p)
+cix_client_event_handler(struct cix_event *event, cix_event_flags_t flags,
+    void *p)
 {
 	struct cix_client *client = container_of(event, struct cix_client,
 	    event);
@@ -158,11 +171,6 @@ cix_client_init(struct cix_client *client, const char *address, uint16_t port,
 	struct addrinfo *result;
 	int r;
 	char port_buf[8];
-
-	if (cix_event_manager_init(&client->event_manager) == false) {
-		fprintf(stderr, "Failed to initialize client event manager\n");
-		return false;
-	}
 
 	client->callbacks = *callbacks;
 	client->closure = closure;
@@ -193,34 +201,23 @@ cix_client_init(struct cix_client *client, const char *address, uint16_t port,
 		return false;
 	}
 
-	/*
-	if (fcntl(client->fd, F_SETFL, O_NONBLOCK) != 0) {
-		perror("fcntl");
-		return false;
-	}
-	*/
-
 	if (connect(client->fd, result->ai_addr, result->ai_addrlen) != 0) {
 		perror("connect");
 		return false;
 	}
 
-	if (cix_event_init_fd(&client->event, client->fd, cix_client_event,
-	    client) == false ||
-	    cix_event_add(&client->event_manager, &client->event) == false) {
+	if (fcntl(client->fd, F_SETFL, O_NONBLOCK) != 0) {
+		perror("fcntl");
+		return false;
+	}
+
+	if (cix_event_init_fd(&client->event, client->fd,
+	    cix_client_event_handler, client) == false) {
 		fprintf(stderr, "failed to initialize event handler\n");
 		return false;
 	}
 
 	return true;
-}
-
-void
-cix_client_run(struct cix_client *client)
-{
-
-	cix_event_manager_run(&client->event_manager);
-	return;
 }
 
 bool

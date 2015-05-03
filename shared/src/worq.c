@@ -4,12 +4,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "event.h"
 #include "misc.h"
 #include "worq.h"
 
-/* XXX: Ensure we have the correct size here */
-#define CIX_WORQ_CACHE_LINE 64
-#define CIX_WORQ_CACHE_LINE_MASK (CIX_WORQ_CACHE_LINE - 1)
+#define CIX_WORQ_CACHE_LINE_MASK (CK_MD_CACHELINE - 1)
 
 struct cix_worq_item {
 	unsigned int ready;
@@ -26,10 +25,8 @@ cix_worq_init(struct cix_worq *worq, size_t item_size, unsigned int length)
 	worq->slot_size = item_size + sizeof(struct cix_worq_item);
 	overage = worq->slot_size & CIX_WORQ_CACHE_LINE_MASK;
 	if (overage > 0) {
-		worq->slot_size += CIX_WORQ_CACHE_LINE - overage;
+		worq->slot_size += CK_MD_CACHELINE - overage;
 	}
-
-	printf("slot size is %zu\n", worq->slot_size);
 
 	worq->items = calloc(length, worq->slot_size);
 	if (worq->items == NULL) {
@@ -41,6 +38,7 @@ cix_worq_init(struct cix_worq *worq, size_t item_size, unsigned int length)
 	worq->mask = worq->size - 1;
 	worq->consume_cursor = 0;
 	worq->produce_cursor = 0;
+	worq->event = NULL;
 
 	return true;
 }
@@ -92,6 +90,11 @@ cix_worq_publish(struct cix_worq *worq, void *data)
 	/* Make sure that all producer data was written before publishing. */
 	ck_pr_fence_release();
 	slot->ready = 1;
+
+	if (worq->event != NULL && cix_event_managed_trigger(worq->event) ==
+	    false) {
+		fprintf(stderr, "failed to notify worq consumer\n");
+	}
 
 	return;
 }
@@ -155,4 +158,17 @@ cix_worq_complete(struct cix_worq *worq, void *data)
 
 	++worq->consume_cursor;
 	return;
+}
+
+bool
+cix_worq_event_subscribe(struct cix_worq *worq, struct cix_event *event)
+{
+
+	if (worq->event != NULL) {
+		fprintf(stderr, "worq already has a subscriber\n");
+		return false;
+	}
+
+	worq->event = event;
+	return true;
 }

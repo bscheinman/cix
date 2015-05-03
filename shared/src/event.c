@@ -4,10 +4,12 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/timerfd.h>
 
 #include "event.h"
 
@@ -32,7 +34,7 @@ cix_event_managed_drain(struct cix_event *event)
 	int64_t value;
 	ssize_t r;
 
-	assert(event->managed == true);
+	assert(event->type == CIX_EVENT_MANAGED);
 
 	for (;;) {
 		r = read(event->fd, &value, sizeof value);
@@ -72,7 +74,7 @@ cix_event_manager_run(struct cix_event_manager *manager)
 			struct cix_event *event = events[i].data.ptr;
 			uint32_t flags = events[i].events;
 
-			if (event->managed == true) {
+			if (event->type == CIX_EVENT_MANAGED) {
 				if ((flags & EPOLLIN) == 0) {
 					continue;
 				}
@@ -80,6 +82,12 @@ cix_event_manager_run(struct cix_event_manager *manager)
 			}
 
 			event->handler(event, flags, event->closure);
+
+			if (event->type == CIX_EVENT_TIMER &&
+			    cix_event_timer_set(event, event->data.timer.ns) ==
+			    false) {
+				fprintf(stderr, "failed to reset timer\n");
+			}
 		}
 	}
 
@@ -88,7 +96,7 @@ cix_event_manager_run(struct cix_event_manager *manager)
 
 bool
 cix_event_init_managed(struct cix_event *event,
-    cix_event_handler_t *handler, void *closure)
+    cix_event_handler_t handler, void *closure)
 {
 
 	event->fd = eventfd(0, EFD_NONBLOCK);
@@ -97,7 +105,7 @@ cix_event_init_managed(struct cix_event *event,
 		return false;
 	}
 
-	event->managed = true;
+	event->type = CIX_EVENT_MANAGED;
 	event->handler = handler;
 	event->closure = closure;
 	return true;
@@ -105,11 +113,29 @@ cix_event_init_managed(struct cix_event *event,
 
 bool
 cix_event_init_fd(struct cix_event *event, int fd,
-    cix_event_handler_t *handler, void *closure)
+    cix_event_handler_t handler, void *closure)
 {
 
 	event->fd = fd;
-	event->managed = false;
+	event->type = CIX_EVENT_FD;
+	event->handler = handler;
+	event->closure = closure;
+
+	return true;
+}
+
+bool
+cix_event_init_timer(struct cix_event *event, cix_event_handler_t handler,
+    void *closure)
+{
+
+	event->fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+	if (event->fd == -1) {
+		fprintf(stderr, "failed to initialize timer\n");
+		return false;
+	}
+
+	event->type = CIX_EVENT_TIMER;
 	event->handler = handler;
 	event->closure = closure;
 
@@ -152,10 +178,10 @@ cix_event_remove(struct cix_event_manager *manager, struct cix_event *event)
 bool
 cix_event_managed_trigger(struct cix_event *event)
 {
-	int64_t value = 1;
+	static const int64_t value = 1;
 	ssize_t w;
 
-	assert(event->managed == true);
+	assert(event->type == CIX_EVENT_MANAGED);
 
 	for (;;) {
 		w = write(event->fd, &value, sizeof value);
@@ -170,6 +196,36 @@ cix_event_managed_trigger(struct cix_event *event)
 	}
 
 	return false;
+}
+
+bool
+cix_event_timer_set(struct cix_event *event, unsigned long long ns)
+{
+	struct itimerspec spec;
+	int r;
+
+	assert(event->type == CIX_EVENT_TIMER);
+
+	event->data.timer.ns = ns;
+	spec.it_interval.tv_sec = ns / 1000000000;
+	spec.it_interval.tv_nsec = ns % 1000000000;
+	spec.it_value = spec.it_interval;
+	r = timerfd_settime(event->fd, 0, &spec, NULL);
+
+	if (r != 0) {
+		fprintf(stderr, "failed to set event timer: %s\n",
+		    strerror(errno));
+		return false;
+	}
+
+	return true;
+}
+
+bool
+cix_event_timer_stop(struct cix_event *event)
+{
+
+	return cix_event_timer_set(event, 0);
 }
 
 bool
