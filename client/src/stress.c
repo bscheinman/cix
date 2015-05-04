@@ -142,6 +142,17 @@ stress_execution_handler(struct cix_client_execution *exec, void *closure)
 }
 
 static void
+stress_ack_handler(struct cix_client_ack *ack, void *closure)
+{
+
+	(void)closure;
+
+	printf("order %s ack'd (server ID %" CIX_PR_ID ")\n",
+	    ack->client_id, ack->server_id);
+	return;
+}
+
+static void
 stress_thread_send_orders(struct cix_event *event, cix_event_flags_t flags,
     void *closure)
 {
@@ -191,7 +202,7 @@ stress_thread_run(void *closure)
 {
 	struct stress_thread *thread = closure;
 	struct cix_client_callbacks callbacks = {
-		.ack = NULL,
+		.ack = stress_ack_handler,
 		.exec = stress_execution_handler
 	};
 

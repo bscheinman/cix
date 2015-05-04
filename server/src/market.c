@@ -230,8 +230,6 @@ cix_market_init(struct cix_vector *symbols, unsigned int n_thread)
 		    cix_market_symbol_thread(market, symbol);
 		struct cix_book *book = cix_vector_next(&thread->books);
 
-		printf("symbol %s\n", symbol->symbol);
-
 		if (book == NULL) {
 			fprintf(stderr, "failed to create orderbook\n");
 			goto fail;

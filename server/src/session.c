@@ -632,3 +632,29 @@ cix_session_execution_report(struct cix_session *session,
 	cix_worq_publish(queue, event);
 	return true;
 }
+
+bool
+cix_session_ack_report(struct cix_session *session, const char *external_id,
+    cix_order_id_t internal_id, enum cix_order_status status)
+{
+	struct cix_session_internal_event *event;
+	struct cix_worq *queue = &session->internal.queue;
+	struct cix_message *message;
+
+	event = cix_worq_claim(queue);
+
+	if (event == NULL) {
+		fprintf(stderr, "failed to report ack: message queue is "
+		    "full\n");
+		return false;
+	}
+
+	message = &event->message;
+	message->type = CIX_MESSAGE_ACK;
+	strcpy(message->payload.ack.external_id, external_id);
+	message->payload.ack.internal_id = internal_id;
+	message->payload.ack.status = status;
+
+	cix_worq_publish(queue, event);
+	return true;
+}

@@ -1,7 +1,7 @@
 #ifndef _CIX_MESSAGES_H
 #define _CIX_MESSAGES_H
 
-#include <stdint.h>
+#include <inttypes.h>
 #include <stdlib.h>
 
 #include "misc.h"
@@ -45,10 +45,6 @@ enum cix_order_status {
 	CIX_ORDER_STATUS_ERROR
 	/* XXX: Add values for specific error types */
 };
-
-/*
- * XXX: Look into whether extra struct padding would improve performance.
- */
 
 /*
  * Each message has a fixed size to avoid size and parsing overhead

@@ -204,21 +204,34 @@ cix_book_order(struct cix_book *book, struct cix_message_order *message,
 {
 	/* XXX: slab allocation */
 	struct cix_order *order = malloc(sizeof *order);
+	bool result = false;
+	cix_order_id_t internal_id;
 
 	if (order == NULL) {
 		fprintf(stderr, "failed to allocate memory for order\n");
-		return false;
+		goto done;
 	}
 
 	memcpy(&order->data, message, sizeof order->data);
 
-	if (cix_id_next(&cix_exec_id_gen, &book->id_block, &order->id) ==
+	if (cix_id_next(&cix_exec_id_gen, &book->id_block, &internal_id) ==
 	    false) {
 		fprintf(stderr, "failed to generate order ID\n");
-		free(order);
-		return false;
+		goto done;
 	}
 
+	/*
+	 * Report a successful ack here even though processing is not complete
+	 * so that the ack is ordered before any executions.  If there is an
+	 * error processing the order, we can send a bust message later.
+	 */
+	if (cix_session_ack_report(session, message->external_id,
+	    internal_id, CIX_ORDER_STATUS_OK) == false) {
+		fprintf(stderr, "failed to report ack for order %s\n",
+		    message->external_id);
+		goto done;
+	}
+	
 	order->session = session;
 	order->user = cix_session_user_id(session);
 	order->remaining = order->data.quantity;
@@ -226,14 +239,21 @@ cix_book_order(struct cix_book *book, struct cix_message_order *message,
 
 	switch (order->data.side) {
 	case CIX_TRADE_SIDE_BUY:
-		return cix_book_buy(book, order);
+		result = cix_book_buy(book, order);
+		break;
 	case CIX_TRADE_SIDE_SELL:
-		return cix_book_sell(book, order);
+		result = cix_book_sell(book, order);
+		break;
 	default:
 		fprintf(stderr, "unknown trade side %u\n", order->data.side);
 		abort();
 		break;
 	}
 
-	return false;
+done:
+	if (result == false) {
+		free(order);
+	}
+
+	return result;
 }
